@@ -56,6 +56,7 @@ def main() -> None:
         include_t2v=not args.t2i_only,
         auto_download=True,
         auto_convert=not args.no_convert,
+        require_artifacts=not args.no_convert,
         convert_dtypes=parse_convert_dtypes(args.convert_dtypes),
     )
     try:

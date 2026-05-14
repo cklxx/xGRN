@@ -29,6 +29,7 @@ class BootstrapConfig:
     include_t2v: bool = True
     auto_download: bool = True
     auto_convert: bool = True
+    require_artifacts: bool = True
     convert_dtypes: tuple[str, ...] = DEFAULT_CONVERT_DTYPES
 
 
@@ -235,6 +236,9 @@ def ensure_model_assets(config: BootstrapConfig, progress: Callable[[str], None]
             )
     else:
         _progress(progress, f"raw model cache ready: {config.model_dir}")
+
+    if not config.require_artifacts:
+        return
 
     missing_artifacts = _missing(_artifact_paths(config.model_dir, config.include_t2v, config.convert_dtypes))
     if not missing_artifacts:
