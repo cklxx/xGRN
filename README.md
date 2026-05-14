@@ -18,14 +18,65 @@ Full benchmark table in [Performance](#performance).
 
 ## Quickstart
 
+### Install
+
 ```bash
 uv sync --python 3.11
-uv run xgrn-download
-uv run xgrn-convert --model-dir models/GRN --out-dir models/GRN/mlx --dtype fp16
+```
+
+xGRN reuses the official GRN text encoder implementation, so the official
+source checkout must sit beside this repo:
+
+```bash
+cd ..
+git clone https://github.com/MGenAI/GRN GRN
+cd xGRN
+```
+
+### Start
+
+```bash
+uv run xgrn-app
+```
+
+Open <http://127.0.0.1:7860>. If the port is busy, use another one:
+
+```bash
+uv run xgrn-app --server-port 7861
+```
+
+### First Use
+
+On first startup, `xgrn-app` checks `models/GRN`. If the required weights are
+missing, it downloads the official HuggingFace snapshot with progress, retries a
+failed download once, then creates the MLX artifacts used by the app. Existing
+files are reused, so later launches skip the download and conversion.
+The full T2I+T2V cache is large; keep enough free disk for the raw HuggingFace
+snapshot plus MLX `fp16`/`fp32` artifacts.
+
+T2I and T2V weights are prepared by default. The cache location, model id, and
+revision are configurable:
+
+```bash
+XGRN_MODEL_DIR=/Volumes/ssd/xgrn/GRN \
+XGRN_HF_REPO_ID=bytedance-research/GRN \
+XGRN_HF_REVISION=main \
+uv run xgrn-app --server-port 7861
+```
+
+Set `XGRN_AUTO_DOWNLOAD=0` or pass `--no-auto-download` when you want startup to
+fail fast with a repair command instead of downloading.
+
+Manual prefetch is optional, but useful before a demo or on a slow network:
+
+```bash
+uv run xgrn-download --model-dir models/GRN
 uv run xgrn-run --task T2I
 uv run xgrn-validate outputs/latest_t2i.png
-uv run xgrn-app        # open http://127.0.0.1:7860
 ```
+
+If startup is blocked, the error prints the missing files and the exact command
+to repair the cache.
 
 ## Outputs
 
