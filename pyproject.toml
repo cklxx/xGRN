@@ -1,0 +1,45 @@
+[project]
+name = "xgrn"
+version = "0.1.0"
+description = "GRN on Apple Metal with a visualization UI"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "einops>=0.8.1",
+    "ftfy>=6.3.1",
+    "gradio>=5.0",
+    "huggingface-hub>=0.30",
+    "imageio>=2.37",
+    "imageio-ffmpeg>=0.6",
+    "mlx>=0.29",
+    "numpy>=1.26",
+    "opencv-python>=4.11",
+    "pandas>=2.2",
+    "pillow>=10",
+    "regex>=2024.0.0",
+    "scipy>=1.11",
+    "sentencepiece>=0.2",
+    "timm==0.9.12",
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "transformers>=4.45",
+]
+
+[project.scripts]
+xgrn-app = "app:main"
+xgrn-bench = "xgrn_mlx.bench:main"
+xgrn-convert = "xgrn_mlx.convert:main"
+xgrn-download = "xgrn_metal.download:main"
+xgrn-hbq-parity = "xgrn_mlx.hbq_parity:main"
+xgrn-parity = "xgrn_mlx.parity:main"
+xgrn-pytorch-bench = "xgrn_metal.bench_pytorch:main"
+xgrn-run = "xgrn_mlx.run:main"
+xgrn-validate = "xgrn_mlx.validate:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app"]
+packages = ["xgrn_metal", "xgrn_mlx", "flash_attn"]
