@@ -134,6 +134,7 @@ def run_profile(
     min_change_frac: float = 0.0,
     track_token_confidence: bool = False,
     precompute_pt_embed: bool = False,
+    cfg_start_step: int = 0,
     release_after_run: bool = False,
     release_text_cache: bool = False,
 ) -> dict:
@@ -170,6 +171,7 @@ def run_profile(
         min_change_frac=min_change_frac,
         track_token_confidence=track_token_confidence,
         precompute_pt_embed=precompute_pt_embed,
+        cfg_start_step=cfg_start_step,
         release_after_run=release_after_run,
         release_text_cache=release_text_cache,
         h_div_w=profile.h_div_w,
@@ -204,6 +206,7 @@ def run_profile(
         "min_change_frac": min_change_frac,
         "track_token_confidence": track_token_confidence,
         "precompute_pt_embed": precompute_pt_embed,
+        "cfg_start_step": cfg_start_step,
         "release_after_run": release_after_run,
         "release_text_cache": release_text_cache,
         "run_index": run_index,
@@ -300,6 +303,15 @@ def main() -> None:
     parser.add_argument("--min-change-frac", type=float, default=0.0, help="Experimental early-stop threshold. 0 disables early termination.")
     parser.add_argument("--track-token-confidence", action="store_true", help="Experimental: add per-step confidence stats for DUS research.")
     parser.add_argument("--precompute-pt-embed", action="store_true", help="Experimental: precompute per-step pt_embed tokens before refinement.")
+    parser.add_argument(
+        "--cfg-start-step",
+        type=int,
+        default=0,
+        help=(
+            "Skip the unconditional CFG lane for steps < K and resume CFG at step >= K. "
+            "0 keeps current behavior (CFG every step, bit-identical)."
+        ),
+    )
     parser.add_argument("--steps", type=int, help="Override profile refinement steps.")
     parser.add_argument("--repeat", type=int, default=1, help="Repeat each profile in one process to expose warm-run performance.")
     parser.add_argument("--warmup", action="store_true", help="Run each profile once before measurement in the same process.")
@@ -359,6 +371,7 @@ def main() -> None:
                 min_change_frac=args.min_change_frac,
                 track_token_confidence=args.track_token_confidence,
                 precompute_pt_embed=args.precompute_pt_embed,
+                cfg_start_step=args.cfg_start_step,
                 release_after_run=False,
                 release_text_cache=False,
             )
@@ -386,6 +399,7 @@ def main() -> None:
                 min_change_frac=args.min_change_frac,
                 track_token_confidence=args.track_token_confidence,
                 precompute_pt_embed=args.precompute_pt_embed,
+                cfg_start_step=args.cfg_start_step,
                 release_after_run=args.release_after_run,
                 release_text_cache=args.release_text_cache,
             )

@@ -163,7 +163,7 @@ That single fact decides what we try next:
 | A2 | Custom Metal: fused `attn_out + residual + pre-MLP rmsnorm` | ~10–15 ms/step | proposed |
 | A3 | Custom Metal: fused sampling + mask update with `atomic_outputs` | ~5–10 ms/step | proposed |
 | B | Whole-stack `mx.compile(shapeless=True)` across all 28 blocks | cross-block fusion | active, codex tmux |
-| C | Late-step-only CFG (skip uncond before step K), CFG-lane KV sharing | ~15–20 % wall | active, codex tmux |
+| C | Late-step-only CFG (`--cfg-start-step K`, skip uncond before step K) | 13.8 % wall at K=15 on the standard prompt | shipped opt-in, K=0 default, see Experiment Outcomes |
 | D | Step distillation (DiMO / CDLM) → 8–12 steps | 3–10× | future training |
 
 Aggregate ceiling on the kernel-fusion tracks alone: dispatches **200 → ~70**,
@@ -193,11 +193,12 @@ for the active task briefs.
 | `--stack-cfg-cache` | reduces Python arguments but debug warm repeat-3 regressed to 1.09 s |
 | `--min-change-frac 0.005` | did not early-stop on a 0.06M/20 smoke; not a default speed path |
 | `--track-token-confidence` | `0.25M/50` trace shows 50% of tokens exceed 0.9 confidence only at step 38, so sparse DUS is not justified yet |
+| `--cfg-start-step K` (Track C) | K=0 byte-identical to today. On the standard `t2i-correct` prompt: K=10 passes razor-thin (CLIP 0.9332, 9.4% saving), **K=15 passes with margin (0.9635, 13.8% saving, end-to-end 76.66 → 66.10 s)**, K=17/20/25 collapse CLIP (0.5997/0.7440/0.0028). Quality non-monotonic in K → ship opt-in, do not flip default until a multi-prompt K stability sweep clears every prompt at 0.93. |
 
 Regressed experiments remain as opt-in flags for investigation. `--no-compile-visual-pass`,
 `--compile-refinement-update`, `--sampling-mode argmax`, `--sampling-mode binary`,
 `--linear-quantization`, `--mask-schedule dus`, `--precompute-pt-embed`, `--fuse-swiglu-metal`,
-`--stack-cfg-cache`, `--compute-dtype fp32`, and `--decoder-backend mps` are kept
+`--stack-cfg-cache`, `--compute-dtype fp32`, `--decoder-backend mps`, and `--cfg-start-step` are kept
 for parity and debug comparison. `--weights-dtype fp16` is the strongest
 low-memory correct path, but fp32 weights stay default for the best speed and
 semantic margin.

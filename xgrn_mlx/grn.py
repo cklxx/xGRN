@@ -635,6 +635,7 @@ class GRN2BMLX:
         min_change_frac: float = 0.0,
         track_token_confidence: bool = False,
         precompute_pt_embed: bool = False,
+        cfg_start_step: int = 0,
         frame_callback: Callable[[int, mx.array], None] | None = None,
         capture_interval: int = 0,
     ) -> tuple[mx.array, list[dict]]:
@@ -644,6 +645,8 @@ class GRN2BMLX:
             raise ValueError(f"unsupported mask schedule {mask_schedule}")
         if min_change_frac < 0.0:
             raise ValueError("min_change_frac must be non-negative")
+        if cfg_start_step < 0:
+            raise ValueError("cfg_start_step must be non-negative")
         if temperature <= 0:
             raise ValueError(f"temperature must be positive, got {temperature}")
         mx.random.seed(seed)
@@ -672,7 +675,12 @@ class GRN2BMLX:
             cur_pt = next_pt
             pt_embed_token = self.pt_embed(cur_pt) if pt_embed_tokens is None else pt_embed_tokens[step]
             visual_input = mx.concatenate([self.embed_visual_labels(mixed), pt_embed_token], axis=1)
-            if uncond_cache is not None:
+            # When cfg_start_step > 0, run only the conditional (cond-only) visual
+            # forward for steps < cfg_start_step, and resume the CFG-batched path
+            # at step >= cfg_start_step. Bit-identical to today when K=0 because
+            # the condition reduces to (uncond_cache is not None) for all steps.
+            use_cfg_this_step = uncond_cache is not None and step >= cfg_start_step
+            if use_cfg_this_step:
                 if self.compile_cfg_logits:
                     logits = self.cfg_logits_compiled(visual_input, rope, cfg_cache, token_count, guidance, temperature)
                 else:

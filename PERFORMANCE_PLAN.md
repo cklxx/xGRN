@@ -67,9 +67,25 @@ Per-block compile already regressed. The unexplored direction is a **single shap
 
 ### Track C — Late-step-only CFG and KV-cache sharing
 
-Algorithmic, not kernel. Published finding for MaskGIT-style discrete masked generators: high CFG weight early in sampling hurts quality, late guidance dominates effect. Tactic: run only the conditional visual pass for steps 0..K-1 and the CFG-batched cond+uncond pass for steps K..49. With K=25 this halves visual-pass cost on the first half ≈ **15–20% wall-time reduction**. Sub-tactic: cache the visual-tower KV that does not depend on prompt text across CFG lanes so the uncond lane only pays the cross-attn delta.
+Algorithmic, not kernel. Published finding for MaskGIT-style discrete masked generators: high CFG weight early in sampling hurts quality, late guidance dominates effect. Tactic: run only the conditional visual pass for steps 0..K-1 and the CFG-batched cond+uncond pass for steps K..49. Implemented as `--cfg-start-step K`, default `K=0` (bit-identical to today). When `step < K`, the loop runs the existing `visual_forward_embedded(visual_input, rope, cond_cache)` path (B=1) and skips the CFG mix.
 
-Gate requirement: sweep K ∈ {10, 20, 25, 30} at `t2i-correct` and pick the largest K that holds CLIP positive >= 0.93. If no K passes, demote to an opt-in `--cfg-start-step K` flag, not a default.
+Sweep on the standard `t2i-correct` prompt (0.25M / 50 steps, `--stable-shape-warmup --repeat 3`):
+
+| K | end_to_end (s) | CLIP positive | passes 0.93 | save vs K=0 |
+|---:|---:|---:|:---:|---:|
+| 0 | 76.66 | 0.9904 | yes | — |
+| 5 | 72.89 | 0.8235 | NO | +4.9 % |
+| 10 | 69.44 | 0.9332 | yes (razor) | +9.4 % |
+| **15** | **66.10** | **0.9635** | **yes** | **+13.8 %** |
+| 17 | 64.66 | 0.5997 | NO | +15.7 % |
+| 20 | 62.67 | 0.7440 | NO | +18.2 % |
+| 25 | 59.48 | 0.0028 | NO | +22.4 % |
+
+Wall savings scale roughly linearly with K (~1 s per K-step, consistent with cond-only visual forward costing about half of the CFG-batched two-lane forward). Quality is highly non-monotonic in K — K=15 passes solidly, K=17 collapses, K=20 partially recovers, K=25 fully collapses. Not the smooth quality curve the published MaskGIT late-CFG result predicts for our GRN-2B / 50-step / 0.25M setup.
+
+Decision: shipped as opt-in `--cfg-start-step K`, default K=0, **no default change**. K=15 is the recommended user-tunable speed knob on the standard prompt. Promoting K=15 as default requires a multi-prompt K-stability sweep clearing every prompt at 0.93.
+
+Sub-tactic still proposed (not yet implemented): cache the visual-tower KV that does not depend on prompt text across CFG lanes so the uncond lane only pays the cross-attn delta. The cond-only branch also uses uncompiled `block_maybe_compiled`; compiling it for B=1 fixed shape would tighten the savings curve and remove the +0.8 GB RSS overhead during steps < K. Both belong to a future iteration.
 
 ### Track D — Step distillation as a future training run
 

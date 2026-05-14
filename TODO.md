@@ -131,10 +131,12 @@ Driven by the M4 Pro dispatch-overhead hypothesis: ~200 Metal dispatches/step at
 
 ### Track C — Late-step-only CFG and CFG-lane KV sharing
 
-- [ ] Add `--cfg-start-step K` (default 0). When `step < K`, run only the conditional visual forward; do not allocate uncond KV.
-- [ ] CFG-lane KV-cache share for visual-tower KV that does not depend on prompt text. Parity vs current batched path within `1e-3` bf16.
-- [ ] Sweep `K ∈ {0, 10, 20, 25, 30}` on `t2i-correct`; promote the largest K with CLIP positive >= 0.93.
-- [ ] If no K passes, keep default 0 and document failure in README "Experiment Outcomes".
+- [x] Add `--cfg-start-step K` (default 0). When `step < K`, run only the conditional visual forward (existing `visual_forward_embedded` with `cond_cache`). K=0 is bit-identical to today (verified by SHA-256 PNG match).
+- [x] Sweep `K ∈ {0, 5, 10, 15, 17, 20, 25}` on `t2i-correct`. K=15 saves 13.8% wall on the standard prompt (76.66 → 66.10 s end-to-end) with CLIP 0.9635. K=10 passes razor-thin (0.9332). K=17/20/25 fail strict 0.93 gate.
+- [x] Decision: ship `--cfg-start-step K` as opt-in flag, default K=0 (no default change). Quality is non-monotonic in K → prompt/seed sensitivity makes a default unsafe without a multi-prompt validation set.
+- [ ] CFG-lane KV-cache share for visual-tower KV that does not depend on prompt text — still proposed, not implemented.
+- [ ] Multi-prompt K stability sweep (5–10 prompts, K ∈ {10, 12, 15}). Required before any default promotion.
+- [ ] Compile the cond-only `visual_forward_embedded` for B=1 fixed-shape too. Would tighten the K>0 savings curve and shrink the +0.8 GB RSS overhead during steps < K.
 
 ### Track D — Step distillation (future, training-side)
 
