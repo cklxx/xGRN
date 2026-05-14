@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gc
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,18 @@ import mlx.core as mx
 import numpy as np
 from PIL import Image
 
+from .bootstrap import (
+    BootstrapConfig,
+    ModelBootstrapError,
+    convert_dtypes_from_env,
+    dtypes_for_runtime,
+    env_bool,
+    ensure_runtime_ready,
+    model_dir_from_env,
+    parse_convert_dtypes,
+    repo_id_from_env,
+    revision_from_env,
+)
 from .decode import HBQMPSDecoder
 from .grn import GRN2BMLX
 from .hbq_mlx import HBQMLXDecoder
@@ -337,7 +350,13 @@ def generate_mac(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Mac-specialized xGRN MLX runtime.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run one xGRN generation on the Mac-specialized MLX runtime. "
+            "Missing model assets are downloaded and converted before generation unless disabled."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument("--task", choices=["T2I", "T2V"], default="T2I")
     parser.add_argument("--prompt", default="A small red apple on a wooden table, natural light")
     parser.add_argument("--negative-prompt", default="blurry, low quality, watermark, text")
@@ -354,6 +373,42 @@ def main() -> None:
     parser.add_argument("--decoder-backend", choices=["native", "mps"], default="native")
     parser.add_argument("--decoder-weights-dtype", choices=["fp32", "fp16"], default="fp16")
     parser.add_argument("--decoder-compute-dtype", choices=["fp32", "bf16", "fp16"], default="fp16")
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=model_dir_from_env(),
+        help="Local GRN model cache directory. Env: XGRN_MODEL_DIR.",
+    )
+    parser.add_argument(
+        "--repo-id",
+        default=repo_id_from_env(),
+        help="HuggingFace model repo id. Env: XGRN_HF_REPO_ID.",
+    )
+    parser.add_argument(
+        "--revision",
+        default=revision_from_env(),
+        help="HuggingFace revision/tag/commit. Env: XGRN_HF_REVISION.",
+    )
+    parser.add_argument(
+        "--convert-dtypes",
+        default=",".join(convert_dtypes_from_env()),
+        help="Comma-separated MLX artifact dtypes to ensure. Env: XGRN_CONVERT_DTYPES.",
+    )
+    parser.add_argument(
+        "--auto-download",
+        dest="auto_download",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("XGRN_AUTO_DOWNLOAD", True),
+        help="Download missing raw weights; --no-auto-download prints a repair command instead.",
+    )
+    parser.add_argument(
+        "--auto-convert",
+        dest="auto_convert",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("XGRN_AUTO_CONVERT", True),
+        help="Create missing MLX artifacts; --no-auto-convert prints conversion commands instead.",
+    )
+    parser.add_argument("--skip-bootstrap", action="store_true", help="Run without checking model assets first.")
     parser.add_argument("--compile-blocks", action="store_true")
     parser.add_argument("--linear-quantization", choices=["none", "int8", "int4"], default="none", help="Experimental GRN linear weight-only quantized matmul.")
     parser.set_defaults(compile_visual_pass=True)
@@ -374,6 +429,25 @@ def main() -> None:
     parser.add_argument("--release-after-run", action="store_true", help="Release GRN/decoder/MLX caches after writing outputs. Slower for repeated prompts but lowers post-run memory.")
     parser.add_argument("--release-text-cache", action="store_true", help="Also clear in-process prompt embedding arrays when --release-after-run is set.")
     args = parser.parse_args()
+    model_dir = args.model_dir.expanduser()
+    if not args.skip_bootstrap:
+        requested_dtypes = parse_convert_dtypes(args.convert_dtypes)
+        runtime_dtypes = dtypes_for_runtime(args.weights_dtype, args.decoder_backend, args.decoder_weights_dtype)
+        convert_dtypes = tuple(dict.fromkeys([*requested_dtypes, *runtime_dtypes]))
+        config = BootstrapConfig(
+            model_dir=model_dir,
+            repo_id=args.repo_id,
+            revision=args.revision,
+            include_t2v=args.task == "T2V",
+            auto_download=args.auto_download,
+            auto_convert=args.auto_convert,
+            convert_dtypes=convert_dtypes,
+        )
+        try:
+            ensure_runtime_ready(config, progress=lambda msg: print(f"[xGRN] {msg}", flush=True))
+        except ModelBootstrapError as exc:
+            print(f"[xGRN] Startup blocked:\n{exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
     result = generate_mac(
         task=args.task,
         prompt=args.prompt,
@@ -384,6 +458,7 @@ def main() -> None:
         guidance=args.guidance,
         temperature=args.temperature,
         duration=args.duration,
+        model_dir=model_dir,
         text_dtype=args.text_dtype,
         text_cache_dtype=args.text_cache_dtype,
         weights_dtype=args.weights_dtype,

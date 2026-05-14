@@ -217,6 +217,7 @@ def download_weights(
     model_dir: Path,
     repo_id: str = "bytedance-research/GRN",
     include_t2v: bool = True,
+    revision: str | None = None,
 ) -> Path:
     model_dir.mkdir(parents=True, exist_ok=True)
     patterns = [
@@ -231,6 +232,7 @@ def download_weights(
         snapshot_download(
             repo_id=repo_id,
             repo_type="model",
+            revision=revision,
             local_dir=str(model_dir),
             allow_patterns=patterns,
         )

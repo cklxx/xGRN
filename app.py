@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 import gradio as gr
 import pandas as pd
 
+from xgrn_mlx.bootstrap import (
+    BootstrapConfig,
+    ModelBootstrapError,
+    convert_dtypes_from_env,
+    env_bool,
+    ensure_runtime_ready,
+    model_dir_from_env,
+    parse_convert_dtypes,
+    repo_id_from_env,
+    revision_from_env,
+)
 from xgrn_mlx.run import generate_mac
 
 
@@ -13,6 +27,8 @@ NEGATIVE_PROMPT = (
     "ugly, blurry, low-resolution, low-detail, low-quality, noisy, artifacts, "
     "text, watermark, logo, bad composition, deformed, mutated"
 )
+
+APP_MODEL_DIR = model_dir_from_env()
 
 
 def run(
@@ -78,6 +94,7 @@ def run(
         h_div_w=float(h_div_w),
         duration=float(duration),
         capture_interval=int(capture_interval),
+        model_dir=APP_MODEL_DIR,
         progress=report,
     )
     df = pd.DataFrame(result.stats)
@@ -106,6 +123,7 @@ def run(
         "latest_video": str(result.video) if result.video else None,
         "latest_refinement_gif": str(result.refinement_gif) if result.refinement_gif else None,
         "stats_csv": "outputs/refinement_stats.csv",
+        "model_dir": str(APP_MODEL_DIR),
     }
     frames = result.refinement_frames if result.refinement_frames else []
     return result.image, str(result.video) if result.video else None, frames, df, json.dumps(summary, indent=2)
@@ -177,7 +195,80 @@ with gr.Blocks(title="xGRN Metal") as demo:
 
 
 def main() -> None:
-    demo.queue(default_concurrency_limit=1).launch(server_name="127.0.0.1", server_port=7860, show_error=True)
+    parser = argparse.ArgumentParser(
+        description=(
+            "Start the xGRN Gradio app. On first run, xGRN checks the local model cache, "
+            "downloads missing GRN weights from HuggingFace, and converts them to MLX artifacts."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--server-name", default=os.environ.get("XGRN_SERVER_NAME", "127.0.0.1"))
+    parser.add_argument("--server-port", type=int, default=int(os.environ.get("XGRN_SERVER_PORT", "7860")))
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=model_dir_from_env(),
+        help="Local GRN model cache directory. Env: XGRN_MODEL_DIR.",
+    )
+    parser.add_argument(
+        "--repo-id",
+        default=repo_id_from_env(),
+        help="HuggingFace model repo id. Env: XGRN_HF_REPO_ID.",
+    )
+    parser.add_argument(
+        "--revision",
+        default=revision_from_env(),
+        help="HuggingFace revision/tag/commit. Env: XGRN_HF_REVISION.",
+    )
+    parser.add_argument(
+        "--convert-dtypes",
+        default=",".join(convert_dtypes_from_env()),
+        help="Comma-separated MLX artifact dtypes to ensure. Env: XGRN_CONVERT_DTYPES.",
+    )
+    parser.add_argument(
+        "--auto-download",
+        dest="auto_download",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("XGRN_AUTO_DOWNLOAD", True),
+        help="Download missing raw weights; --no-auto-download prints a repair command instead.",
+    )
+    parser.add_argument(
+        "--auto-convert",
+        dest="auto_convert",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("XGRN_AUTO_CONVERT", True),
+        help="Create missing MLX artifacts; --no-auto-convert prints conversion commands instead.",
+    )
+    parser.add_argument("--skip-bootstrap", action="store_true", help="Start the UI without checking model assets.")
+    parser.add_argument("--bootstrap-only", action="store_true", help="Check/download/convert model assets, then exit before launching Gradio.")
+    args = parser.parse_args()
+
+    global APP_MODEL_DIR
+    APP_MODEL_DIR = args.model_dir.expanduser()
+
+    if not args.skip_bootstrap:
+        config = BootstrapConfig(
+            model_dir=APP_MODEL_DIR,
+            repo_id=args.repo_id,
+            revision=args.revision,
+            include_t2v=True,
+            auto_download=args.auto_download,
+            auto_convert=args.auto_convert,
+            convert_dtypes=parse_convert_dtypes(args.convert_dtypes),
+        )
+        try:
+            ensure_runtime_ready(config, progress=lambda msg: print(f"[xGRN] {msg}", flush=True))
+        except ModelBootstrapError as exc:
+            print(f"[xGRN] Startup blocked:\n{exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+    if args.bootstrap_only:
+        print(f"[xGRN] bootstrap complete: {APP_MODEL_DIR}", flush=True)
+        return
+    demo.queue(default_concurrency_limit=1).launch(
+        server_name=args.server_name,
+        server_port=args.server_port,
+        show_error=True,
+    )
 
 
 if __name__ == "__main__":

@@ -19,9 +19,11 @@ _TEXT_ARRAY_CACHE: dict[str, tuple[mx.array, mx.array]] = {}
 def _ensure_reference_importable() -> None:
     if not REFERENCE_GRN.exists():
         raise FileNotFoundError(
-            f"Official GRN repo not found at {REFERENCE_GRN}. "
-            "It must be a sibling of the xGRN checkout. "
-            "See README quickstart: clone GRN alongside xGRN so the layout is ../GRN/."
+            "Official GRN repo not found. xGRN needs the official source checkout for the UMT5 text encoder.\n"
+            f"Expected path: {REFERENCE_GRN}\n\n"
+            "Fix:\n"
+            f"  cd {REFERENCE_GRN.parent}\n"
+            "  git clone https://github.com/MGenAI/GRN GRN"
         )
     root = str(REFERENCE_GRN)
     if root not in sys.path:
