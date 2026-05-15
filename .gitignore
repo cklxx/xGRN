@@ -6,3 +6,4 @@ xgrn.egg-info/
 outputs/
 models/
 .python-version
+.gstack/
