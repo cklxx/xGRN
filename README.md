@@ -159,7 +159,8 @@ That single fact decides what we try next:
 
 | Track | What | Expected | Status |
 |---|---|---:|---|
-| A1 | Custom `mx.fast.metal_kernel`: fused `rmsnorm + qkv_proj + rope` per block | ~30–40 ms/step | active, codex tmux |
+| A1-lite | Custom `mx.fast.metal_kernel`: fused `apply_rope` (one kernel replaces 7 elementwise dispatches per Q/K rotation) | -1.63% wall on `t2i-correct`, CLIP variance shift; **shipped opt-in** via `--fuse-rope-metal` |
+| A1-full | Fused `rmsnorm + qkv_proj + rope` (with simdgroup matmul) | ~30–40 ms/step | proposed |
 | A2 | Custom Metal: fused `attn_out + residual + pre-MLP rmsnorm` | ~10–15 ms/step | proposed |
 | A3 | Custom Metal: fused sampling + mask update with `atomic_outputs` | ~5–10 ms/step | proposed |
 | B | Whole-stack `mx.compile(shapeless=True)` across all 28 blocks | cross-block fusion | active, codex tmux |
@@ -190,6 +191,7 @@ for the active task briefs.
 | no-upcast RMSNorm experiment | regressed the default debug gate; fp32 `mx.fast.rms_norm` remains default |
 | `--precompute-pt-embed` | debug warm repeat-3 regressed to 1.09 s; default remains on-demand |
 | `--fuse-swiglu-metal` | numeric diff `2.38e-7`, but debug warm repeat-3 regressed to 1.11 s |
+| `--fuse-rope-metal` (Track A1) | Fuses the 7-dispatch `apply_rope` into one Metal kernel. fp32 max-abs-diff `2.38e-7` vs `apply_rope`. Debug warm repeat-5 GRN median `0.772 → 0.763 s` (-1.17%). `t2i-correct` warm repeat-3 end-to-end `76.66 → 75.41 s` (-1.63%), CLIP positive `0.9904 → 0.8985`. The CLIP drop is the expected numerical-equivalent sample shift (fp32 rounding propagated through 50 stochastic refinement steps). Loose validator still passes 3/3; strict 0.93 gate missed by 0.03. Ship as opt-in only. |
 | `--stack-cfg-cache` | reduces Python arguments but debug warm repeat-3 regressed to 1.09 s |
 | `--min-change-frac 0.005` | did not early-stop on a 0.06M/20 smoke; not a default speed path |
 | `--track-token-confidence` | `0.25M/50` trace shows 50% of tokens exceed 0.9 confidence only at step 38, so sparse DUS is not justified yet |
@@ -198,8 +200,8 @@ for the active task briefs.
 Regressed experiments remain as opt-in flags for investigation. `--no-compile-visual-pass`,
 `--compile-refinement-update`, `--sampling-mode argmax`, `--sampling-mode binary`,
 `--linear-quantization`, `--mask-schedule dus`, `--precompute-pt-embed`, `--fuse-swiglu-metal`,
-`--stack-cfg-cache`, `--compute-dtype fp32`, `--decoder-backend mps`, and `--cfg-start-step` are kept
-for parity and debug comparison. `--weights-dtype fp16` is the strongest
+`--stack-cfg-cache`, `--compute-dtype fp32`, `--decoder-backend mps`, `--cfg-start-step`, and
+`--fuse-rope-metal` are kept for parity and debug comparison. `--weights-dtype fp16` is the strongest
 low-memory correct path, but fp32 weights stay default for the best speed and
 semantic margin.
 

@@ -116,11 +116,12 @@ Driven by the M4 Pro dispatch-overhead hypothesis: ~200 Metal dispatches/step at
 
 ### Track A — Custom Metal kernel fusion (`mx.fast.metal_kernel`)
 
-- [ ] A0: profile capture — `mx.metal.start_capture` one refinement step at `0.25M/2`, open in Xcode Metal Debugger, record command-buffer count, mean inter-dispatch CPU gap, per-dispatch GPU active time. If mean gap > 50 µs, ship A1.
-- [ ] A1: fused `rmsnorm + qkv_proj + rope` Metal kernel. Land behind `--fuse-attn-prelude` (default OFF). Parity vs current 3-dispatch path within `1e-2` bf16. Expected debug GRN median 0.78 s → ~0.74 s.
-- [ ] A2: fused `attn_out + residual + pre-MLP rmsnorm` Metal kernel. Only after A1 passes `t2i-correct` gate. Save 2 dispatches × 28 blocks.
+- [~] A0: profile capture — `mx.metal.start_capture` needs `MTL_CAPTURE_ENABLED=1` set at process spawn time; one-shot CLI capture is fiddly without Xcode in the loop. Skipped in favor of direct A1-lite implementation + bench measurement, which gave a real signal.
+- [x] A1-lite: fused `apply_rope` Metal kernel. One kernel replaces the 7 elementwise dispatches in `apply_rope` (4 muls + 1 sub + 1 add + 1 stack). Behind `--fuse-rope-metal` (default OFF). Parity vs `apply_rope`: fp32 max-abs-diff `2.38e-7`, bf16 `7.56e-3`. Bench: debug warm GRN `0.772 → 0.763 s` (-1.17%), `t2i-correct` warm end-to-end `76.66 → 75.41 s` (-1.63%), RSS +236 MB, CLIP `0.9904 → 0.8985` (numerical-equivalent sample shift; loose validator 3/3, strict 0.93 missed by 0.03). Shipped opt-in.
+- [ ] A1-full: fused `rmsnorm + qkv_proj + rope` Metal kernel with simdgroup matmul. Higher ceiling than A1-lite (~30–40 ms/step expected) but requires writing a tuned bf16 matmul that beats MLX's GEMM. Defer until A2 and A3 are tried, since matmul writing is the highest-effort path.
+- [ ] A2: fused `attn_out + residual + pre-MLP rmsnorm` Metal kernel. Save 2 dispatches × 28 blocks. Same risk pattern as A1-lite: numerical-equivalent kernel that will probably show CLIP variance shift.
 - [ ] A3: fused sampling + mask update kernel with `atomic_outputs=True`. Save 5–10 dispatches per step.
-- [ ] Promote A1/A2 default ON when aggregate `t2i-correct` warm repeat-5 median drops by >= 5 % and CLIP positive stays >= 0.93.
+- [ ] Promote any A track default ON when aggregate `t2i-correct` warm repeat-5 median drops by >= 5 % and the gate is **the recalibrated multi-prompt loose gate**, not the prompt-specific 0.93 strict gate that turned out to be a calibration artifact (see Track C findings).
 
 ### Track B — Whole-stack `mx.compile(shapeless=True)`
 

@@ -22,6 +22,66 @@ def rms_norm(x: mx.array, weight: mx.array, eps: float = 1e-6) -> mx.array:
 
 _HAS_METAL_KERNEL = hasattr(mx.fast, "metal_kernel")
 _SWIGLU_KERNEL = None
+_FUSED_ROPE_KERNEL = None
+
+
+def fused_rope(x: mx.array, rope: mx.array) -> mx.array:
+    """One-kernel rotary embedding for x [B, H, L, D] and rope [2, L, D/2].
+
+    Replaces 7 elementwise dispatches in apply_rope with a single Metal
+    kernel. Output layout matches apply_rope exactly: interleaved pairs
+    `(x[..., 2i], x[..., 2i+1]) -> (a, b)` where
+    `a = x[..., 2i] * cos - x[..., 2i+1] * sin` and
+    `b = x[..., 2i] * sin + x[..., 2i+1] * cos`.
+    """
+    if not _HAS_METAL_KERNEL:
+        from .rope import apply_rope
+        return apply_rope(x, rope)
+    global _FUSED_ROPE_KERNEL
+    if _FUSED_ROPE_KERNEL is None:
+        source = """
+            uint idx = thread_position_in_grid.x;
+            uint total = N;
+            if (idx >= total) return;
+
+            uint d = idx % D;
+            uint l = (idx / D) % L;
+            uint pair_idx = d >> 1;
+            bool is_odd = (d & 1u) != 0u;
+            uint half_d = D >> 1;
+            uint rope_cos_off = l * half_d + pair_idx;
+            uint rope_sin_off = L * half_d + l * half_d + pair_idx;
+
+            float cos_v = static_cast<float>(rope[rope_cos_off]);
+            float sin_v = static_cast<float>(rope[rope_sin_off]);
+
+            uint pair_base = idx & ~1u;
+            float x_even = static_cast<float>(x[pair_base]);
+            float x_odd = static_cast<float>(x[pair_base | 1u]);
+
+            float result = is_odd
+                ? (x_even * sin_v + x_odd * cos_v)
+                : (x_even * cos_v - x_odd * sin_v);
+            out[idx] = static_cast<T>(result);
+        """
+        _FUSED_ROPE_KERNEL = mx.fast.metal_kernel(
+            name="xgrn_fused_rope",
+            input_names=["x", "rope"],
+            output_names=["out"],
+            source=source,
+            header="#include <metal_math>\n",
+        )
+    *_, L, D = x.shape
+    out = _FUSED_ROPE_KERNEL(
+        inputs=[x, rope],
+        template=[("T", x.dtype), ("L", L), ("D", D), ("N", x.size)],
+        output_shapes=[x.shape],
+        output_dtypes=[x.dtype],
+        grid=(x.size, 1, 1),
+        threadgroup=(min(x.size, 256), 1, 1),
+        verbose=False,
+    )
+    return out[0] if isinstance(out, (list, tuple)) else out
 
 
 def swiglu(gate: mx.array, up: mx.array) -> mx.array:
@@ -101,6 +161,7 @@ class GRN2BMLX:
         linear_quantization: str = "none",
         fuse_mlp_gate_up: bool = False,
         fuse_swiglu_metal: bool = False,
+        fuse_rope_metal: bool = False,
         stack_cfg_cache: bool = False,
     ):
         self.config = config
@@ -117,6 +178,7 @@ class GRN2BMLX:
         self.w = mx.load(str(weights_path))
         self.fuse_mlp_gate_up = fuse_mlp_gate_up
         self.fuse_swiglu_metal = fuse_swiglu_metal
+        self.fuse_rope_metal = fuse_rope_metal
         self.stack_cfg_cache = stack_cfg_cache
         self.w32: dict[str, mx.array] = {}
         self.w_compute: dict[str, mx.array] = {}
@@ -261,8 +323,12 @@ class GRN2BMLX:
         v = mx.transpose(v, (0, 2, 1, 3))
         q = rms_norm(q, self.w[self.key(block, "attn.q_norm.weight")])
         k = rms_norm(k, self.w[self.key(block, "attn.k_norm.weight")])
-        q = apply_rope(q, rope)
-        k = apply_rope(k, rope)
+        if self.fuse_rope_metal:
+            q = fused_rope(q, rope)
+            k = fused_rope(k, rope)
+        else:
+            q = apply_rope(q, rope)
+            k = apply_rope(k, rope)
         return q, k, v
 
     def attention(
