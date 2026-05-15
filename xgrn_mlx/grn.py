@@ -364,6 +364,7 @@ class GRN2BMLX:
         fuse_rope_metal: bool = False,
         fuse_residual_norm_metal: bool = False,
         fuse_qkv_metal: bool = False,
+        fuse_qkv_concat: bool = False,
         stack_cfg_cache: bool = False,
     ):
         self.config = config
@@ -383,6 +384,8 @@ class GRN2BMLX:
         self.fuse_rope_metal = fuse_rope_metal
         self.fuse_residual_norm_metal = fuse_residual_norm_metal
         self.fuse_qkv_metal = fuse_qkv_metal
+        self.fuse_qkv_concat = fuse_qkv_concat
+        self.w_qkv_concat: dict[int, mx.array] = {}
         self.stack_cfg_cache = stack_cfg_cache
         self.w32: dict[str, mx.array] = {}
         self.w_compute: dict[str, mx.array] = {}
@@ -511,6 +514,71 @@ class GRN2BMLX:
         labels_by_token = mx.transpose(labels, (0, 2, 3, 4, 1)).reshape(b, pt * ph * pw, d)
         return mx.addmm(base, labels_by_token.astype(mx.float32), delta)
 
+    def qkv_concat_weight(self, block: int) -> mx.array:
+        """Cache the concatenated [q_proj | k_proj | v_proj] weight per block.
+
+        Used by `_qkv_concat_mlx`. Avoids three separate matmul dispatches by
+        producing the whole qkv output in one larger matmul. Concatenation
+        happens once per block lifetime, then cached.
+        """
+        if block not in self.w_qkv_concat:
+            q_w = self.compute_weight(f"{self.key(block, 'attn.q_proj')}.weight")
+            k_w = self.compute_weight(f"{self.key(block, 'attn.k_proj')}.weight")
+            v_w = self.compute_weight(f"{self.key(block, 'attn.v_proj')}.weight")
+            concat = mx.concatenate([q_w, k_w, v_w], axis=-1)
+            mx.eval(concat)
+            self.w_qkv_concat[block] = concat
+        return self.w_qkv_concat[block]
+
+    def _qkv_concat_mlx(
+        self,
+        x: mx.array,
+        block: int,
+        b: int,
+        l: int,
+        cfg: GRN2BConfig,
+    ) -> tuple[mx.array, mx.array, mx.array]:
+        """Track A1-full M3 (MLX path): one fused MLX matmul for QKV.
+
+        Replaces three `block_linear` calls (q_proj, k_proj, v_proj) with a
+        single matmul against the concatenated qkv weight. No custom Metal
+        kernel -- this is just a layout-level fusion that uses MLX's tuned
+        matmul. Avoids the integration tax that `--fuse-qkv-metal` hit
+        because there is no `mx.fast.metal_kernel` op in the graph.
+
+        Microbench (M=514, K=2304, N=2304 vs N=6912): MLX is ~0.6 % faster
+        on the single fused matmul than on three separate; the dispatch
+        savings (3 matmul ops -> 1 in the compile graph) are the bigger
+        deal.
+        """
+        h = x.shape[-1]
+        n_heads = cfg.num_heads
+        n_kv = cfg.num_key_value_heads
+        head_dim = cfg.head_dim
+        q_out = n_heads * head_dim
+        k_out = n_kv * head_dim
+        qkv_w = self.qkv_concat_weight(block)
+        x_compute = x.astype(self.compute_dtype) if self.compute_dtype != mx.float32 else x
+        qkv_out = x_compute @ qkv_w
+        if self.compute_dtype != mx.float32:
+            qkv_out = qkv_out.astype(mx.float32)
+        # Splits are views into the contiguous concat output.
+        q = qkv_out[..., :q_out].reshape(b, l, n_heads, head_dim)
+        k = qkv_out[..., q_out:q_out + k_out].reshape(b, l, n_kv, head_dim)
+        v = qkv_out[..., q_out + k_out:].reshape(b, l, n_kv, head_dim)
+        # Optional projection biases.
+        for tag, arr in (("q_proj", q), ("k_proj", k), ("v_proj", v)):
+            bias_name = f"{self.key(block, f'attn.{tag}')}.bias"
+            if bias_name in self.w:
+                bias = self.fp32_weight(bias_name)
+                if tag == "q_proj":
+                    q = q + bias.reshape(1, 1, n_heads, head_dim)
+                elif tag == "k_proj":
+                    k = k + bias.reshape(1, 1, n_kv, head_dim)
+                else:
+                    v = v + bias.reshape(1, 1, n_kv, head_dim)
+        return q, k, v
+
     def _qkv_fused_bf16(
         self,
         x: mx.array,
@@ -578,6 +646,8 @@ class GRN2BMLX:
             and self.linear_quantization == "none"
         ):
             q, k, v = self._qkv_fused_bf16(x, block, b, l, cfg)
+        elif self.fuse_qkv_concat and self.linear_quantization == "none":
+            q, k, v = self._qkv_concat_mlx(x, block, b, l, cfg)
         else:
             q = self.block_linear(x, block, "attn.q_proj").reshape(b, l, cfg.num_heads, cfg.head_dim)
             k = self.block_linear(x, block, "attn.k_proj").reshape(b, l, cfg.num_key_value_heads, cfg.head_dim)
@@ -937,6 +1007,7 @@ class GRN2BMLX:
         self.w_compute.clear()
         self.w_quant.clear()
         self.w_mlp_gate_up.clear()
+        self.w_qkv_concat.clear()
         self.text_kv_cache.clear()
         self.compiled_text_blocks.clear()
         self.compiled_visual_blocks.clear()
