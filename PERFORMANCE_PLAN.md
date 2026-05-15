@@ -84,6 +84,27 @@ Steps after the matmul-kernel-itself converged:
 
 **Track A summary:** the non-matmul fusion subspace is saturated. The simdgroup matmul project is now at the threshold where M3 fusion can deliver real wall reduction.
 
+### Where time goes inside `visual_forward` (per-op profile, 2026-05-15)
+
+After M3/M5 saturated on integration, ran a non-compiled per-op profile (`outputs/track-a/profile/block_ops.py`) to find new targets:
+
+| Category | ms / step | % | Notes |
+|---|---:|---:|---|
+| MLP `down_proj` matmul | 326 | 18.7 % | [B*L, 8192] @ [8192, 2304] |
+| MLP `up_proj` matmul | 323 | 18.5 % | [B*L, 2304] @ [2304, 8192] |
+| MLP `gate_proj` matmul | 322 | 18.5 % | [B*L, 2304] @ [2304, 8192] |
+| SDPA (`mx.fast.scaled_dot_product_attention`) | 171 | 9.8 % | already a fused Apple kernel |
+| QKV matmuls (q+k+v+o) | 388 | 22.4 % | M3/M5 target — saturated |
+| RoPE q+k (after A1-lite) | 77 | 4.4 % | A1-lite already saved ~50 % of this |
+| silu(gate)*up + small ops | 68 | 3.9 % | A2's class of work |
+| Everything else | 137 | 7.8 % | residuals, norms, transposes |
+
+**Headline:** matmuls in total are **78 %** of per-step time. The MLP block alone is **56 %** — 2.5× bigger than the QKV block we just spent two days on. Reducing matmul count or matmul cost is the *only* meaningful lever; everything else is in the noise floor.
+
+Attempted MLP fusion via `--fuse-mlp-gate-up` (existing flag, MLX matmul on concatenated gate+up weight): regressed t2i-correct by +5.17 % GRN / +8.67 % wall with **CLIP bit-identical** (0.9904 exact). Same regression pattern as `--fuse-qkv-concat`: manual Python-level matmul fusion defeats whatever the mx.compile pass is already doing on the 2 separate matmuls.
+
+**Conclusion:** matmul fusion via `mx.fast.metal_kernel` regresses (integration tax). Matmul fusion via manual MLX concatenation regresses (compile already smarter). The only remaining lever is to either (a) rewrite `simdgroup_matmul` as an MLX C++ extension under `mlx/extensions/` so the compile graph treats it as a first-class primitive, or (b) accept that Track A is saturated on this MLX 0.31 / Metal 4 / M4 Pro stack and the next perf frontier is somewhere other than matmul fusion (training-time distillation per Track D, or architectural changes).
+
 Family-9 implementation rules for every kernel:
 - Use `simdgroup_matrix_storage` 8×8×8 bf16 multiplies for any inner-loop matmul.
 - Specialize via `mx.fast.metal_kernel` template params on `head_dim` and `hidden_dim` for compile-time unrolling.
