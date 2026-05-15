@@ -56,6 +56,10 @@ Each fused kernel must (i) match the existing block dtype contract (fp32 inputs 
 
 Aggregate target: dispatches **200 → 60–80**, GRN per-step **1.55 s → 0.95–1.05 s**, `0.25M/50` GRN **77.70 s → ~50 s** end-to-end **~55–60 s**, a 1.3–1.4× speedup while keeping CLIP >= 0.93.
 
+**Status after 2026-05-15 work:** only **A1-lite** (fused `apply_rope`) delivers a real win at -1.63% wall on `t2i-correct`. **A2** (fused residual + post-attn rms_norm) measured -0.28% GRN with +7% RSS — within noise, kept opt-in only. **A1-full** POC (fused rms_norm + q_proj with naive scalar matmul) is 8× slower than MLX's tuned GEMM in microbench; a real A1-full needs `simdgroup_matrix_storage` 8×8×8 ops (multi-day kernel project, out of session scope). **A3** (fused sampling) deferred — per dispatch-count theory, expected -0.05% to -0.15%, deep in noise. The dispatch-count theory holds cleanly: the wall impact scales with the dispatch saving per step.
+
+**Track A summary:** non-matmul fusion is saturated on this M4 Pro / MLX 0.31 stack. The remaining ceiling (~1.3-1.4× wall) requires a tuned bf16 simdgroup matmul that wins against Apple's GEMM. That is genuinely the next-frontier engineering project and not a session-scope refactor.
+
 Family-9 implementation rules for every kernel:
 - Use `simdgroup_matrix_storage` 8×8×8 bf16 multiplies for any inner-loop matmul.
 - Specialize via `mx.fast.metal_kernel` template params on `head_dim` and `hidden_dim` for compile-time unrolling.

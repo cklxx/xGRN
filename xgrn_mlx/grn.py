@@ -24,6 +24,7 @@ _HAS_METAL_KERNEL = hasattr(mx.fast, "metal_kernel")
 _SWIGLU_KERNEL = None
 _FUSED_ROPE_KERNEL = None
 _FUSED_RESIDUAL_RMSNORM_KERNEL = None
+_FUSED_NORM_QPROJ_KERNEL = None
 
 
 def fused_rope(x: mx.array, rope: mx.array) -> mx.array:
@@ -83,6 +84,114 @@ def fused_rope(x: mx.array, rope: mx.array) -> mx.array:
         verbose=False,
     )
     return out[0] if isinstance(out, (list, tuple)) else out
+
+
+def fused_norm_qproj(
+    x: mx.array,
+    norm_weight: mx.array,
+    proj_weight: mx.array,
+    eps: float = 1e-6,
+) -> mx.array:
+    """Naive fused rmsnorm + linear projection: y = norm(x) @ W.
+
+    *** POC scaffold for Track A1-full. DO NOT WIRE INTO THE HOT PATH. ***
+
+    Measured microbench (B=2, L=257, H=2304, OUT=2304, fp32):
+      MLX `rms_norm + matmul` baseline : ~1.2 ms / call
+      This naive fused kernel           : ~9.4 ms / call   (8x slower)
+
+    Parity vs reference is at fp32 noise floor (max-abs-diff 2.86e-6) -- the
+    fusion structure is correct. The performance gap is the matmul itself:
+    naive scalar dot-products cannot keep up with Apple's tuned GEMM. A
+    real A1-full kernel must use `simdgroup_matrix_storage` 8x8x8
+    `simdgroup_multiply` ops (Apple GPU family 9), iterate along the K
+    dimension in tiles, and use threadgroup memory for the normed-x tile.
+    That is a multi-day kernel project, kept here as scaffolding so the
+    fusion structure (one-threadgroup-per-token rmsnorm reduction +
+    matmul) does not have to be re-derived.
+
+    Inputs:
+      x           : [B, L, H]
+      norm_weight : [H]
+      proj_weight : [H, OUT]   row-major, as MLX stores block-linear weights
+    Returns:
+      y           : [B, L, OUT] in input dtype
+    """
+    if not _HAS_METAL_KERNEL:
+        return linear_via_python(x, norm_weight, proj_weight, eps)
+    global _FUSED_NORM_QPROJ_KERNEL
+    if _FUSED_NORM_QPROJ_KERNEL is None:
+        source_template = """
+            float kEpsilon = {eps_literal}f;
+
+            uint tid = thread_position_in_threadgroup.x;
+            uint token_id = threadgroup_position_in_grid.x;
+            uint x_base = token_id * H;
+
+            threadgroup float ssq_shared[TPG];
+            threadgroup float normed_x[H];
+
+            // Phase 1: sum of squares for rms_norm.
+            float ssq = 0.0f;
+            for (uint i = tid; i < H; i += TPG) {{
+                float v = static_cast<float>(x[x_base + i]);
+                ssq += v * v;
+            }}
+            ssq_shared[tid] = ssq;
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            for (uint stride = TPG >> 1; stride > 0; stride >>= 1) {{
+                if (tid < stride) {{
+                    ssq_shared[tid] += ssq_shared[tid + stride];
+                }}
+                threadgroup_barrier(mem_flags::mem_threadgroup);
+            }}
+            float inv_sigma = metal::rsqrt(ssq_shared[0] / static_cast<float>(H) + kEpsilon);
+
+            // Phase 2: write normalized x to threadgroup memory.
+            for (uint i = tid; i < H; i += TPG) {{
+                float v = static_cast<float>(x[x_base + i]);
+                normed_x[i] = v * inv_sigma * static_cast<float>(norm_weight[i]);
+            }}
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+
+            // Phase 3: each thread computes one output column. We have OUT
+            // outputs per token and TPG threads, so each thread handles
+            // OUT/TPG outputs (typically 2304/256 = 9).
+            for (uint col = tid; col < OUT; col += TPG) {{
+                float acc = 0.0f;
+                for (uint k = 0; k < H; ++k) {{
+                    acc += normed_x[k] * static_cast<float>(proj_weight[k * OUT + col]);
+                }}
+                y[token_id * OUT + col] = static_cast<T>(acc);
+            }}
+        """
+        source = source_template.format(eps_literal=repr(float(eps)))
+        _FUSED_NORM_QPROJ_KERNEL = mx.fast.metal_kernel(
+            name="xgrn_fused_norm_qproj",
+            input_names=["x", "norm_weight", "proj_weight"],
+            output_names=["y"],
+            source=source,
+            header="#include <metal_math>\n",
+        )
+    H = x.shape[-1]
+    OUT = proj_weight.shape[-1]
+    num_tokens = x.size // H
+    TPG = 256
+    outs = _FUSED_NORM_QPROJ_KERNEL(
+        inputs=[x, norm_weight, proj_weight],
+        template=[("T", x.dtype), ("H", H), ("OUT", OUT), ("TPG", TPG)],
+        output_shapes=[x.shape[:-1] + (OUT,)],
+        output_dtypes=[x.dtype],
+        grid=(num_tokens * TPG, 1, 1),
+        threadgroup=(TPG, 1, 1),
+        verbose=False,
+    )
+    return outs[0] if isinstance(outs, (list, tuple)) else outs
+
+
+def linear_via_python(x: mx.array, norm_weight: mx.array, proj_weight: mx.array, eps: float = 1e-6) -> mx.array:
+    """Fallback for builds without mx.fast.metal_kernel."""
+    return rms_norm(x, norm_weight, eps).astype(x.dtype) @ proj_weight
 
 
 def fused_residual_rmsnorm(
