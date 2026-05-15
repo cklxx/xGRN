@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -29,6 +30,48 @@ NEGATIVE_PROMPT = (
 )
 
 APP_MODEL_DIR = model_dir_from_env()
+
+
+def _port_bind_error(server_name: str, server_port: int) -> str | None:
+    host = "" if server_name in {"0.0.0.0", "::"} else server_name
+    try:
+        infos = socket.getaddrinfo(host, server_port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        return f"invalid --server-name {server_name!r}: {exc}"
+    errors: list[OSError] = []
+    for family, socktype, proto, _, sockaddr in infos:
+        with socket.socket(family, socktype, proto) as sock:
+            try:
+                sock.bind(sockaddr)
+                return None
+            except OSError as exc:
+                errors.append(exc)
+    if errors:
+        return str(errors[0])
+    return "no socket address was available"
+
+
+def _next_available_port(server_name: str, start_port: int) -> int:
+    for port in range(start_port + 1, start_port + 21):
+        if _port_bind_error(server_name, port) is None:
+            return port
+    return start_port + 1
+
+
+def _ensure_server_port_available(server_name: str, server_port: int) -> None:
+    bind_error = _port_bind_error(server_name, server_port)
+    if bind_error is None:
+        return
+    suggested_port = _next_available_port(server_name, server_port)
+    print(
+        "[xGRN] Startup blocked:\n"
+        f"Port {server_port} is not available on {server_name}: {bind_error}\n\n"
+        "Fix:\n"
+        f"  uv run xgrn-app --server-port {suggested_port}\n"
+        f"  # or set XGRN_SERVER_PORT={suggested_port}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 def run(
@@ -245,6 +288,9 @@ def main() -> None:
 
     global APP_MODEL_DIR
     APP_MODEL_DIR = args.model_dir.expanduser()
+
+    if not args.bootstrap_only:
+        _ensure_server_port_available(args.server_name, args.server_port)
 
     if not args.skip_bootstrap:
         config = BootstrapConfig(
