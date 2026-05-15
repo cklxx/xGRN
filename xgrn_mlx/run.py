@@ -66,6 +66,7 @@ def _model(
     fuse_residual_norm_metal: bool = False,
     fuse_qkv_metal: bool = False,
     fuse_qkv_concat: bool = False,
+    fuse_qkv_ext: bool = False,
     stack_cfg_cache: bool = False,
 ) -> GRN2BMLX:
     task = task.lower()
@@ -77,6 +78,7 @@ def _model(
         f"fuse_swiglu_metal={fuse_swiglu_metal}:fuse_rope_metal={fuse_rope_metal}:"
         f"fuse_residual_norm_metal={fuse_residual_norm_metal}:"
         f"fuse_qkv_metal={fuse_qkv_metal}:fuse_qkv_concat={fuse_qkv_concat}:"
+        f"fuse_qkv_ext={fuse_qkv_ext}:"
         f"stack_cfg_cache={stack_cfg_cache}"
     )
     if key not in _MODEL_CACHE:
@@ -106,6 +108,7 @@ def _model(
             fuse_residual_norm_metal=fuse_residual_norm_metal,
             fuse_qkv_metal=fuse_qkv_metal,
             fuse_qkv_concat=fuse_qkv_concat,
+            fuse_qkv_ext=fuse_qkv_ext,
             stack_cfg_cache=stack_cfg_cache,
         )
     return _MODEL_CACHE[key]
@@ -204,6 +207,7 @@ def generate_mac(
     fuse_residual_norm_metal: bool = False,
     fuse_qkv_metal: bool = False,
     fuse_qkv_concat: bool = False,
+    fuse_qkv_ext: bool = False,
     stack_cfg_cache: bool = False,
     detailed_stats: bool = False,
     exact_step_sync: bool = False,
@@ -257,6 +261,7 @@ def generate_mac(
         fuse_residual_norm_metal=fuse_residual_norm_metal,
         fuse_qkv_metal=fuse_qkv_metal,
         fuse_qkv_concat=fuse_qkv_concat,
+        fuse_qkv_ext=fuse_qkv_ext,
         stack_cfg_cache=stack_cfg_cache,
     )
     timings["model_load_sec"] = time.perf_counter() - stage
@@ -443,6 +448,7 @@ def main() -> None:
     parser.add_argument("--fuse-residual-norm-metal", action="store_true", help="Experimental: fold (x + attn) and post-attn rms_norm into one Metal kernel per block.")
     parser.add_argument("--fuse-qkv-metal", action="store_true", help="Track A1-full M3/M5: route q/k/v projection matmuls through simdgroup_matmul_bf16; saves the bf16->fp32 post-cast per matmul. Requires --compute-dtype bf16 and no linear quantization.")
     parser.add_argument("--fuse-qkv-concat", action="store_true", help="Track A1-full M3 alt: one MLX matmul against the concatenated [q|k|v] weight per block (no custom kernel; saves 2 matmul dispatches per qkv).")
+    parser.add_argument("--fuse-qkv-ext", action="store_true", help="Track A1-full M3 v2: route q/k/v projection matmuls through the xgrn_ext C++ extension's simdgroup_matmul_bf16 (~0.97x of MLX bf16 matmul in isolation, dispatched from C++ so the visual_pass mx.compile graph treats it on par with native matmul).")
     parser.add_argument("--stack-cfg-cache", action="store_true", help="Experimental: pass stacked CFG K/V cache tensors to the compiled visual pass.")
     parser.add_argument("--detailed-stats", action="store_true", help="Compute entropy and detailed per-step stats; slower because it syncs every step.")
     parser.add_argument("--exact-step-sync", action="store_true", help="Use sampled mask mean as the next step token, matching the debug parity path but adding a per-step sync.")
@@ -511,6 +517,7 @@ def main() -> None:
         fuse_residual_norm_metal=args.fuse_residual_norm_metal,
         fuse_qkv_metal=args.fuse_qkv_metal,
         fuse_qkv_concat=args.fuse_qkv_concat,
+        fuse_qkv_ext=args.fuse_qkv_ext,
         stack_cfg_cache=args.stack_cfg_cache,
         detailed_stats=args.detailed_stats,
         exact_step_sync=args.exact_step_sync,

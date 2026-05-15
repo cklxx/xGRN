@@ -7,3 +7,5 @@ outputs/
 models/
 .python-version
 .gstack/
+xgrn_ext/build/
+xgrn_ext/_core.*.so

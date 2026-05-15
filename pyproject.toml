@@ -46,4 +46,11 @@ py-modules = ["app"]
 # reference checkout (which xgrn_mlx loads via sys.path for the UMT5 text
 # encoder, the parity harness, and the optional MPS HBQ decoder). It is not
 # imported directly by xgrn_mlx code.
-packages = ["xgrn_mlx", "flash_attn"]
+packages = ["xgrn_mlx", "flash_attn", "xgrn_ext"]
+package-data = { "xgrn_ext" = ["*.so"] }
+exclude-package-data = { "xgrn_ext" = ["cpp/*", "build/*", "CMakeLists.txt"] }
+
+[dependency-groups]
+dev = [
+    "nanobind>=2.12.0",
+]

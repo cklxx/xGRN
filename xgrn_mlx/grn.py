@@ -365,6 +365,7 @@ class GRN2BMLX:
         fuse_residual_norm_metal: bool = False,
         fuse_qkv_metal: bool = False,
         fuse_qkv_concat: bool = False,
+        fuse_qkv_ext: bool = False,
         stack_cfg_cache: bool = False,
     ):
         self.config = config
@@ -385,6 +386,7 @@ class GRN2BMLX:
         self.fuse_residual_norm_metal = fuse_residual_norm_metal
         self.fuse_qkv_metal = fuse_qkv_metal
         self.fuse_qkv_concat = fuse_qkv_concat
+        self.fuse_qkv_ext = fuse_qkv_ext
         self.w_qkv_concat: dict[int, mx.array] = {}
         self.stack_cfg_cache = stack_cfg_cache
         self.w32: dict[str, mx.array] = {}
@@ -579,6 +581,53 @@ class GRN2BMLX:
                     v = v + bias.reshape(1, 1, n_kv, head_dim)
         return q, k, v
 
+    def _qkv_fused_ext(
+        self,
+        x: mx.array,
+        block: int,
+        b: int,
+        l: int,
+        cfg: GRN2BConfig,
+    ) -> tuple[mx.array, mx.array, mx.array]:
+        """Track A1-full M3+M5 v2: three QKV matmuls via the xgrn_ext C++ extension.
+
+        Same per-block layout as `_qkv_fused_bf16` (single x.astype(bf16) +
+        pad shared across q/k/v) but the matmul itself dispatches through
+        the C++ extension's `simdgroup_matmul_bf16`, which calls
+        `mx::fast::metal_kernel` from inside the C++ MLX runtime. The
+        hypothesis the prior `--fuse-qkv-metal` failure pointed at: opaque
+        kernel ops *injected from Python* tax the visual_pass mx.compile
+        graph, while the same kernel dispatched from a C++ extension
+        operates at the same level of abstraction as MLX's native matmul.
+        """
+        from xgrn_ext import simdgroup_matmul_bf16 as _ext_bf16
+        h = x.shape[-1]
+        M = b * l
+        x_flat = x.reshape(M, h)
+        x_bf16 = x_flat.astype(mx.bfloat16)
+        M_pad = (M + 31) // 32 * 32
+        if M_pad != M:
+            x_bf16 = mx.pad(x_bf16, [(0, M_pad - M), (0, 0)])
+        q_w = self.compute_weight(f"{self.key(block, 'attn.q_proj')}.weight")
+        k_w = self.compute_weight(f"{self.key(block, 'attn.k_proj')}.weight")
+        v_w = self.compute_weight(f"{self.key(block, 'attn.v_proj')}.weight")
+        q_full = _ext_bf16(x_bf16, q_w)
+        k_full = _ext_bf16(x_bf16, k_w)
+        v_full = _ext_bf16(x_bf16, v_w)
+        q_bias_name = f"{self.key(block, 'attn.q_proj')}.bias"
+        if q_bias_name in self.w:
+            q_full = q_full + self.fp32_weight(q_bias_name)
+        k_bias_name = f"{self.key(block, 'attn.k_proj')}.bias"
+        if k_bias_name in self.w:
+            k_full = k_full + self.fp32_weight(k_bias_name)
+        v_bias_name = f"{self.key(block, 'attn.v_proj')}.bias"
+        if v_bias_name in self.w:
+            v_full = v_full + self.fp32_weight(v_bias_name)
+        q = q_full[:M].reshape(b, l, cfg.num_heads, cfg.head_dim)
+        k = k_full[:M].reshape(b, l, cfg.num_key_value_heads, cfg.head_dim)
+        v = v_full[:M].reshape(b, l, cfg.num_key_value_heads, cfg.head_dim)
+        return q, k, v
+
     def _qkv_fused_bf16(
         self,
         x: mx.array,
@@ -641,6 +690,12 @@ class GRN2BMLX:
         cfg = self.config
         b, l, _ = x.shape
         if (
+            self.fuse_qkv_ext
+            and self.compute_dtype == mx.bfloat16
+            and self.linear_quantization == "none"
+        ):
+            q, k, v = self._qkv_fused_ext(x, block, b, l, cfg)
+        elif (
             self.fuse_qkv_metal
             and self.compute_dtype == mx.bfloat16
             and self.linear_quantization == "none"
