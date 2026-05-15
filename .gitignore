@@ -9,3 +9,6 @@ models/
 .gstack/
 xgrn_ext/build/
 xgrn_ext/_core.*.so
+web/node_modules/
+web/tsconfig.tsbuildinfo
+web/.vite/

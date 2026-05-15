@@ -29,6 +29,26 @@ panel — pick a prompt, pick **Image** or **Video**, pick a **Quality** preset
   <img src="docs/screenshots/ui-create.png" alt="xGRN full Create tab" width="100%">
 </p>
 
+### Architecture
+
+`uv run xgrn-app` boots a single FastAPI process that serves both the JSON API
+(`/api/generate`, `/api/history`, `/api/file/...`, `/api/presets`) and the
+prebuilt React frontend (`web/dist/`). No node runtime needed for end users —
+the bundle ships in git.
+
+If you're hacking on the UI:
+
+```bash
+# terminal 1 — Vite dev server with HMR
+cd web && npm install && npm run dev    # → http://localhost:5173
+
+# terminal 2 — backend with CORS opened to :5173
+uv run xgrn-app --dev                    # → http://127.0.0.1:7860
+
+# when done, rebuild the bundle and commit dist/
+cd web && npm run build
+```
+
 ## Speed at a glance
 
 | | PyTorch/MPS fp32 | xGRN MLX bf16 (cold) | xGRN MLX bf16 (warm) |
