@@ -121,14 +121,16 @@ Driven by the M4 Pro dispatch-overhead hypothesis: ~200 Metal dispatches/step at
 - [x] A2: fused `(x + attn) + post-attn rms_norm` Metal kernel — multi-output, threadgroup reduction over hidden_dim=2304. Behind `--fuse-residual-norm-metal` (default OFF). Parity vs reference: residual exact, normed max-abs-diff `9.54e-7`. **Measured negative result.** `t2i-correct` warm GRN `75.56 → 75.35 s` (-0.28%, within noise), end-to-end `76.66 → 76.55 s` (-0.15%), **RSS +7.09% (+684 MB)** because the two output buffers cannot be freed in-place the way MLX's compile manages residual reuse. 28 dispatches saved per step is too few to outweigh the buffer-allocation cost. Flag kept as a template for A3 / A1-full multi-output kernels but **do not enable**.
 - [~] A1-full: fused `rms_norm + q_proj` Metal kernel.
     - [x] POC scaffold (`fused_norm_qproj` in `xgrn_mlx/grn.py`) with naive scalar matmul: parity perfect (fp32 max-abs-diff 2.86e-6), 8× slower than MLX, not wireable. Proves the fusion structure.
-    - [x] **Simdgroup matmul foundation landed** in `xgrn_mlx/simdgroup_matmul.py`:
-        - fp32 2×2 simdgroup layout: byte-exact parity, **2.13× of MLX matmul** (down from 8× naive)
-        - bf16 simdgroup_matrix<bfloat,8,8> with fp32 accumulator: byte-exact parity, **2.22× of MLX bf16 matmul**
-        - Negative iterations recorded: 4×4 layout (2.22×, more pressure), threadgroup-cached A tile (3.32×, barrier cost > caching benefit)
-        - Conclusion: simdgroup matmul works correctly; remaining 2× gap is bandwidth/occupancy, not compute throughput.
-    - [ ] Close the 2× gap: add `simd_async_copy` double-buffered tile loads, output-stationary register tiling (2-4 accumulators per simdgroup), (M_TILE, N_TILE, K_STEP) autotune sweep.
-    - [ ] After kernel is competitive (<= 1.0× of MLX), fuse rms_norm into the matmul (pre-pass over input tile in threadgroup memory).
-    - [ ] Wire into block() behind `--fuse-qkv-metal` flag; run t2i-correct strict gate.
+    - [x] **Simdgroup matmul foundation landed** in `xgrn_mlx/simdgroup_matmul.py`, iterated through 10 layouts to convergence:
+        - Winner: 2×2 simdgroup per threadgroup + 2×4 register tile per simdgroup (8 accumulators)
+        - **fp32: 1.045× of MLX matmul, byte-exact parity** (max_abs_diff 0.0)
+        - **bf16: 0.975× of MLX bf16 matmul — i.e. ~2.5 % FASTER than MLX**, within bf16 precision
+        - Output-stationary register tiling was the winning structural move (1-acc 2.13× → 8-acc 1.05×)
+        - 4×3 (12 acc) and 4×4 (16 acc) regressed badly (5.65×, 6.32×) — register spill threshold sits between 8 and 12 accumulators
+        - Threadgroup-memory tile caching regressed (3.32×) — barrier cost > L2 cache dedup savings
+        - `simd_async_copy` requires Metal 3's `simdgroup_event` header (not in MLX toolchain) — deferred until toolchain catches up
+    - [ ] M3: fuse rms_norm pre-pass into the simdgroup matmul kernel. Phase 1 ssq reduce + write normed-x to threadgroup memory, phase 2 use normed-x as the A operand for `simdgroup_load`.
+    - [ ] M5: wire into block() behind `--fuse-qkv-metal` flag (default OFF). Strict gate: `xgrn-parity --full-step`, `t2i-correct` CLIP, RSS, end-to-end wall.
 - [~] A3: fused sampling + mask update kernel with `atomic_outputs=True`. **Deferred.** Per-step dispatch saving (~5/step × 50 steps = 250/generation) is too small relative to A1-lite's 16,800/generation. Dispatch-count theory predicts -0.05% to -0.15% wall — deep in noise — and the A2 RSS regression pattern would likely repeat. Not worth the implementation cost given the saturation we've already reached on non-matmul fusion.
 - [ ] Promote any A track default ON when aggregate `t2i-correct` warm repeat-5 median drops by >= 5 % and the gate is **the recalibrated multi-prompt loose gate**, not the prompt-specific 0.93 strict gate that turned out to be a calibration artifact (see Track C findings).
 

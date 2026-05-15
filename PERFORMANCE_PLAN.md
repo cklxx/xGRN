@@ -58,20 +58,31 @@ Aggregate target: dispatches **200 → 60–80**, GRN per-step **1.55 s → 0.95
 
 **Status after 2026-05-15 work:** only **A1-lite** (fused `apply_rope`) delivers a real win at -1.63% wall on `t2i-correct`. **A2** (fused residual + post-attn rms_norm) measured -0.28% GRN with +7% RSS — within noise, kept opt-in only. **A1-full** POC (fused rms_norm + q_proj with naive scalar matmul) is 8× slower than MLX's tuned GEMM in microbench. **A3** (fused sampling) deferred — per dispatch-count theory, expected -0.05% to -0.15%, deep in noise.
 
-**Simdgroup matmul project (Track A1-full real foundation)** is now officially open. Landed in `xgrn_mlx/simdgroup_matmul.py`:
-- fp32 2×2 `simdgroup_matrix<float,8,8>` GEMM: byte-exact parity, **2.13× of MLX matmul** (8× → 4.39× → 2.13× across three iterations)
-- bf16 2×2 `simdgroup_matrix<bfloat,8,8>` GEMM with fp32 accumulator: byte-exact parity, 2.22× of MLX bf16 matmul
-- Recorded negative iterations: 4×4 layout (2.22× — too many threads), threadgroup-cached A tile (3.32× — barrier cost dominated). bf16 confirmed working but does not change the gap, so the remaining 2× is **bandwidth/occupancy structural**, not compute throughput.
+**Simdgroup matmul project (Track A1-full real foundation)** — landed in `xgrn_mlx/simdgroup_matmul.py`. Through 10 iterations the kernel went from 8× slower than MLX to **matching/beating MLX**:
 
-Next-iteration paths to close the gap (multi-session work):
-1. `metal::simd_async_copy` device-to-threadgroup with double-buffered tile pipelining (overlap memory with compute).
-2. Output-stationary register tiling (each simdgroup holds 2-4 accumulators across one K traversal).
-3. Larger output tiles per simdgroup (multiple simdgroup_matrix per accumulator).
-4. (M_TILE, N_TILE, K_STEP) autotune sweep on M4 Pro.
+| Iteration | Layout | fp32 vs MLX matmul |
+|---|---|---:|
+| Naive scalar (from earlier commit) | one thread per output element | 8.07× |
+| Naive 1-simdgroup-per-tile | each simdgroup does one 8×8 output | 4.39× |
+| 2×2 simdgroup layout | 1 accumulator per simdgroup | 2.13× |
+| 4×4 simdgroup layout | 1 accumulator per simdgroup | 2.22× |
+| 2×2 sg + threadgroup-cached A | manual cooperative load | 3.32× (barriers dominate) |
+| 2×2 sg + 2 acc per sg | output-stationary register tiling | 1.82× |
+| 2×2 sg + 2×2 register tile (4 acc) | | 1.34× |
+| **2×2 sg + 2×4 register tile (8 acc)** | **production layout** | **1.05× fp32, 0.975× bf16** |
+| 2×2 sg + 4×2 register tile (8 acc) | other 8-acc shape | 1.09× |
+| 2×2 sg + 4×4 register tile (16 acc) | too many registers | 6.32× (spill) |
+| 2×2 sg + 4×3 register tile (12 acc) | too many registers | 5.65× (spill) |
 
-Once the kernel is at <= 1.0× of MLX, fuse rms_norm pre-pass and wire into `block()` behind `--fuse-qkv-metal` flag.
+The winner — 2×4 register tile per simdgroup (8 accumulators) — packs enough output area per simdgroup to amortize the inner-loop overhead while staying within the M4 Pro register file. **At bf16 the kernel is ~2.5% faster than MLX's bf16 matmul**, and at fp32 within 5%. Byte-exact parity (fp32) / within precision (bf16).
 
-**Track A summary:** the non-matmul fusion subspace is saturated on this stack. The remaining ceiling (~1.3-1.4× wall) lives behind the simdgroup matmul project, which is now scaffolded but not yet competitive.
+`simd_async_copy` for double-buffered loads was attempted but requires Metal 3's `simdgroup_event` header which is not present in MLX's current toolchain. Deferred until the toolchain catches up.
+
+Next steps in the project (now that matmul is competitive):
+1. **M3** — fuse rms_norm into the simdgroup matmul kernel. The phase-1 ssq reduction can write normed-x into threadgroup memory, which the simdgroup_load then reads as the A operand.
+2. **M5** — wire into `block()` behind `--fuse-qkv-metal` flag, run the strict `xgrn-parity --full-step` + `t2i-correct` gate.
+
+**Track A summary:** the non-matmul fusion subspace is saturated. The simdgroup matmul project is now at the threshold where M3 fusion can deliver real wall reduction.
 
 Family-9 implementation rules for every kernel:
 - Use `simdgroup_matrix_storage` 8×8×8 bf16 multiplies for any inner-loop matmul.
