@@ -92,17 +92,62 @@ async function jsonOrThrow<T>(p: Promise<Response>): Promise<T> {
   return r.json() as Promise<T>
 }
 
+/** Async generator that yields parsed NDJSON objects from a Fetch stream. */
+async function* readNDJSON(response: Response): AsyncGenerator<any> {
+  if (!response.body) throw new Error('no response body')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let nl: number
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim()
+        buffer = buffer.slice(nl + 1)
+        if (line) yield JSON.parse(line)
+      }
+    }
+    if (buffer.trim()) yield JSON.parse(buffer)
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+export type ProgressEvent =
+  | { type: 'status'; msg: string; elapsed_sec: number }
+  | { type: 'done'; result: GenerateResponse }
+  | { type: 'error'; message: string }
+
 export const api = {
   presets: () => jsonOrThrow<PresetMeta>(fetch('/api/presets')),
   history: () => jsonOrThrow<HistoryItem[]>(fetch('/api/history')),
-  generate: (body: GenerateRequest) =>
-    jsonOrThrow<GenerateResponse>(
-      fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    ),
+  /**
+   * Streaming generate. Calls onStatus for every progress event, returns the
+   * final GenerateResponse. Throws on `error` events or HTTP failure.
+   */
+  async generate(
+    body: GenerateRequest,
+    onStatus?: (msg: string, elapsedSec: number) => void,
+  ): Promise<GenerateResponse> {
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText)
+      throw new Error(text || `HTTP ${response.status}`)
+    }
+    for await (const ev of readNDJSON(response) as AsyncGenerator<ProgressEvent>) {
+      if (ev.type === 'status') onStatus?.(ev.msg, ev.elapsed_sec)
+      else if (ev.type === 'done') return ev.result
+      else if (ev.type === 'error') throw new Error(ev.message)
+    }
+    throw new Error('stream ended without a result')
+  },
   fileUrl: (path: string) => `/api/file/${path.replace(/^\/+/, '')}`,
 }
 

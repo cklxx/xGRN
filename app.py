@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
-import random
+import queue
 import socket
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -244,13 +246,68 @@ def create_app(model_dir: Path, dev: bool = False) -> FastAPI:
         return FileResponse(path)
 
     @app.post("/api/generate")
-    async def generate(body: GenerateBody) -> dict[str, Any]:
+    async def generate(body: GenerateBody) -> StreamingResponse:
+        """NDJSON stream:
+            {"type":"status","msg":"loading prompt embeddings","elapsed_sec":0.30}
+            {"type":"status","msg":"running MLX GRN: ...","elapsed_sec":1.40}
+            ...
+            {"type":"done","result":{...}}
+        On failure:
+            {"type":"error","message":"..."}
+        """
         if STATE is None:
             raise HTTPException(status_code=500, detail="state not initialised")
         if body.aspect not in ASPECT_RATIOS:
             raise HTTPException(status_code=400, detail=f"unknown aspect {body.aspect!r}")
-        async with STATE.generation_lock:
-            return await asyncio.to_thread(_run_generation, body)
+
+        progress_q: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+        def progress_cb(msg: str) -> None:
+            progress_q.put(("status", msg))
+
+        def run_in_thread() -> None:
+            try:
+                res = _run_generation(body, progress_cb)
+                progress_q.put(("done", res))
+            except Exception as exc:  # surface to client
+                progress_q.put(("error", repr(exc)))
+
+        async def event_stream():
+            assert STATE is not None
+            # Single-mutex: hold the lock for the whole stream so concurrent
+            # requests queue server-side rather than racing the GPU.
+            async with STATE.generation_lock:
+                start = time.perf_counter()
+                t = threading.Thread(target=run_in_thread, daemon=True)
+                t.start()
+                # Initial event so the client can switch to "running" immediately
+                yield _ndjson({"type": "status", "msg": "queued", "elapsed_sec": 0.0})
+
+                while True:
+                    try:
+                        kind, payload = progress_q.get_nowait()
+                    except queue.Empty:
+                        if not t.is_alive() and progress_q.empty():
+                            yield _ndjson({"type": "error", "message": "worker exited without result"})
+                            return
+                        await asyncio.sleep(0.08)
+                        continue
+
+                    elapsed = round(time.perf_counter() - start, 2)
+                    if kind == "status":
+                        yield _ndjson({"type": "status", "msg": payload, "elapsed_sec": elapsed})
+                    elif kind == "done":
+                        yield _ndjson({"type": "done", "result": payload})
+                        return
+                    elif kind == "error":
+                        yield _ndjson({"type": "error", "message": payload})
+                        return
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+        )
 
     # ── Static frontend ────────────────────────────────────────────────────
     if WEB_DIST.exists():
@@ -286,7 +343,11 @@ def create_app(model_dir: Path, dev: bool = False) -> FastAPI:
     return app
 
 
-def _run_generation(body: GenerateBody) -> dict[str, Any]:
+def _ndjson(obj: dict[str, Any]) -> bytes:
+    return (json.dumps(obj, default=str) + "\n").encode("utf-8")
+
+
+def _run_generation(body: GenerateBody, progress_cb: Callable[[str], None] | None = None) -> dict[str, Any]:
     assert STATE is not None
     preset = QUALITY_PRESETS[body.quality]
     pn = preset["pn"]
@@ -321,6 +382,7 @@ def _run_generation(body: GenerateBody) -> dict[str, Any]:
         duration=float(body.duration),
         capture_interval=int(body.capture_interval),
         model_dir=STATE.model_dir,
+        progress=progress_cb,
     )
     elapsed = result.elapsed_sec or (time.perf_counter() - started)
 

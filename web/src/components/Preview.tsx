@@ -7,11 +7,13 @@ export function Preview({
   result,
   loading,
   elapsed,
+  statusMsg,
   initialImage,
 }: {
   result: GenerateResponse | null
   loading: boolean
   elapsed: number
+  statusMsg?: string
   initialImage: string | null
 }) {
   const imgSrc = result?.image_url ?? (loading ? null : initialImage)
@@ -24,7 +26,7 @@ export function Preview({
         <div className="relative rounded-lg overflow-hidden bg-sub border border-line">
           <div className="aspect-square sm:aspect-auto sm:min-h-[480px] lg:min-h-[560px] grid place-items-center">
             {loading ? (
-              <LoadingState elapsed={elapsed} />
+              <LoadingState elapsed={elapsed} statusMsg={statusMsg} />
             ) : isVideo ? (
               <video
                 key={videoSrc}
@@ -61,7 +63,7 @@ export function Preview({
           {loading ? (
             <Pill tone="terra">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-white pulse-dot" />
-              Generating · {elapsed.toFixed(1)}s
+              {statusMsg || 'Generating'} · {elapsed.toFixed(1)}s
             </Pill>
           ) : result ? (
             <>
@@ -99,11 +101,12 @@ function EmptyState() {
   )
 }
 
-function LoadingState({ elapsed }: { elapsed: number }) {
+function LoadingState({ elapsed, statusMsg }: { elapsed: number; statusMsg?: string }) {
   return (
-    <div className="flex flex-col items-center text-muted p-12 gap-3">
+    <div className="flex flex-col items-center text-muted p-12 gap-3 min-w-[260px]">
       <div className="spin h-8 w-8 rounded-full border-[3px] border-line border-t-terra" />
-      <p className="text-sm">Generating · <span className="font-mono">{elapsed.toFixed(1)}s</span></p>
+      <p className="text-sm font-mono text-ink">{elapsed.toFixed(1)}s</p>
+      <p className="text-xs text-muted text-center max-w-[280px] truncate">{statusMsg || 'starting…'}</p>
     </div>
   )
 }

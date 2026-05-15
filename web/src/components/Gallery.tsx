@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw, Image as ImageIcon, Film, Loader2 } from 'lucide-react'
 import { Button, Card } from './ui'
+import { Lightbox, type LightboxItem } from './Lightbox'
 import { api, type HistoryItem } from '../lib/api'
 
 export function Gallery() {
   const [items, setItems] = useState<HistoryItem[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [active, setActive] = useState<LightboxItem | null>(null)
 
   const load = async () => {
     setRefreshing(true)
@@ -43,12 +45,10 @@ export function Gallery() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
           {items.map((it) => (
-            <a
+            <button
               key={it.url}
-              href={it.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group relative aspect-square rounded-lg border border-line bg-sub overflow-hidden hover:border-terra/50 hover:shadow-soft transition-all"
+              onClick={() => setActive({ url: it.url, filename: it.filename, type: it.type })}
+              className="group relative aspect-square rounded-lg border border-line bg-sub overflow-hidden hover:border-terra/50 hover:shadow-soft transition-all focus-visible:outline-none focus-visible:ring focus-visible:ring-terra/30"
             >
               {it.type === 'video' ? (
                 <video src={it.url} className="h-full w-full object-cover" muted />
@@ -61,10 +61,12 @@ export function Gallery() {
                   {it.filename}
                 </div>
               </div>
-            </a>
+            </button>
           ))}
         </div>
       )}
+
+      <Lightbox item={active} onClose={() => setActive(null)} />
     </div>
   )
 }
