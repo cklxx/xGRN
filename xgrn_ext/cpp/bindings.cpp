@@ -12,6 +12,7 @@
 #include <mlx/utils.h>
 
 #include "simdgroup_matmul.h"
+#include "simdgroup_matmul_primitive.h"
 
 namespace nb = nanobind;
 using namespace mlx::core;
@@ -56,5 +57,26 @@ NB_MODULE(_core, m) {
 
         Constraints: A: [M, K] bf16, B: [K, N] bf16, M % 32 == 0,
         N % 64 == 0, K % 8 == 0.
+      )pbdoc");
+
+  m.def(
+      "simdgroup_matmul_primitive",
+      [](const array& a, const array& b, StreamOrDevice s) {
+        return xgrn_ext::simdgroup_matmul_primitive(a, b, s);
+      },
+      nb::arg("a"),
+      nb::arg("b"),
+      nb::kw_only(),
+      nb::arg("stream") = nb::none(),
+      R"pbdoc(
+        Same matmul kernel as `simdgroup_matmul_{fp32,bf16}` but
+        wrapped in an `mx::fast::Custom` Primitive subclass. mx.compile
+        now sees a NAMED primitive (`SimdgroupMatmul`) and uses the
+        fallback `(a.astype(fp32) @ b.astype(fp32))` for shape inference
+        and graph optimization. eval_gpu dispatches the real kernel and
+        points the output array at its buffer via `copy_shared_buffer`.
+
+        Inputs may be fp32 or bf16; output is always fp32. Constraints
+        M % 32 == 0, N % 64 == 0, K % 8 == 0 still apply.
       )pbdoc");
 }

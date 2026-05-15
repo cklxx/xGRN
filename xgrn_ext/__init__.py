@@ -10,6 +10,14 @@ Built via:
     cmake --build xgrn_ext/build -j
 """
 
-from ._core import simdgroup_matmul_bf16, simdgroup_matmul_fp32
+from ._core import (
+    simdgroup_matmul_bf16,
+    simdgroup_matmul_fp32,
+    simdgroup_matmul_primitive,
+)
 
-__all__ = ["simdgroup_matmul_bf16", "simdgroup_matmul_fp32"]
+__all__ = [
+    "simdgroup_matmul_bf16",
+    "simdgroup_matmul_fp32",
+    "simdgroup_matmul_primitive",
+]

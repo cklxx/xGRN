@@ -29,6 +29,7 @@ nanobind_add_module(_core
   NB_DOMAIN mlx
   cpp/bindings.cpp
   cpp/simdgroup_matmul.cpp
+  cpp/simdgroup_matmul_primitive.cpp
 )
 
 # Drop the built .so into the importable Python package dir so

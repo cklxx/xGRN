@@ -76,25 +76,72 @@ C = xgrn_ext.simdgroup_matmul_bf16(A, B)  # [544, 2304] fp32
 The extension is currently consumed by `xgrn_mlx.grn._qkv_fused_ext`
 when the `--fuse-qkv-ext` runtime flag is on (default OFF).
 
-## Next iteration: Custom Primitive subclass
+## Custom Primitive subclass — wired, eval_gpu blocked on Metal Toolchain
 
-The current C++ functions call `mx::fast::metal_kernel(...)` which
-constructs an MLX `CustomKernel` primitive each call. Even with the
-kernel cache the compile graph sees this as an opaque op and cannot
-fuse around it -- the same limitation that hits the Python
-`mx.fast.metal_kernel` path. A proper solution subclasses
-`mx::fast::Custom` from `mlx/fast_primitives.h`:
+`xgrn_ext.simdgroup_matmul_primitive(a, b)` is wired through
+`xgrn_ext/cpp/simdgroup_matmul_primitive.{h,cpp}` as a `mlx::core::Primitive`
+subclass named `SimdgroupMatmul`. mx.compile sees it as a NAMED primitive
+in the graph, and shape inference works (`array.shape == (M, N)`,
+`array.dtype == float32`). What is NOT implemented is `eval_gpu`.
+
+### Why eval_gpu can't be implemented in this environment
+
+Two approaches tried, both fail:
+
+1. **Call `mx::fast::metal_kernel(...)(...)` from inside eval_gpu**, then
+   `mx::eval` the result and `outputs[0].copy_shared_buffer(result)`.
+   Crashes with a Metal assertion:
+   ```
+   -[_MTLCommandBuffer addCompletedHandler:]:1011:
+   failed assertion `Completed handler provided after commit call'
+   ```
+   Forcing `mx::eval` inside an already-running primitive's eval_gpu
+   creates a nested command-buffer lifecycle the Metal runtime rejects.
+
+2. **Same trick with `mlx::core::matmul`** (i.e. just defer to MLX matmul
+   inside eval_gpu) — same assertion. The problem isn't *which op*
+   produces the result, it's the recursive `mx::eval` from eval_gpu.
+
+The correct pattern, used by MLX's own primitives and the upstream
+`examples/extensions/axpby`:
 
 ```cpp
-class SimdgroupMatmul : public mx::fast::Custom {
-  // store M, K, N, dtype as members
-  // override eval_gpu to call mx::fast::metal_kernel
-  // provide a fallback `array @ array` lambda for mx.compile to trace
-  // override output_shapes, name, is_equivalent, vjp/jvp stubs
-};
+void SimdgroupMatmul::eval_gpu(...) {
+  outputs[0].set_data(allocator::malloc(nbytes));
+  auto lib = metal::device(s).get_library("xgrn_ext", binary_dir());
+  auto kernel = lib.get_kernel("xgrn_sgm_bf16");
+  auto& encoder = metal::get_command_encoder(s);
+  encoder.set_compute_pipeline_state(kernel);
+  // ... bind buffers + dispatch ...
+}
 ```
 
-The fallback lambda is what `mx.compile` uses for shape/dtype
-inference and to compose with surrounding ops. With it in place the
-kernel becomes a named primitive in the compile graph -- on par with
-how `RMSNorm` and `RoPE` already work inside MLX.
+This requires a **precompiled `xgrn_ext.metallib`** built at extension
+build time via the `mlx_build_metallib` CMake macro (from `extension.cmake`).
+That macro shells out to `xcrun -sdk macosx metal`, and on this Mac:
+
+```
+$ xcrun -sdk macosx metal -c test.metal
+error: cannot execute tool 'metal' due to missing Metal Toolchain;
+use: xcodebuild -downloadComponent MetalToolchain
+```
+
+### To unblock
+
+```bash
+sudo xcodebuild -downloadComponent MetalToolchain
+```
+
+After that:
+1. Add a `cpp/xgrn_ext.metal` with `xgrn_sgm_fp32` / `xgrn_sgm_bf16` kernels
+2. Add `mlx_build_metallib(... TARGET xgrn_ext_metallib SOURCES cpp/xgrn_ext.metal ...)` to `CMakeLists.txt`
+3. Implement `SimdgroupMatmul::eval_gpu` to load the metallib via
+   `mlx::core::metal::device(s).get_library("xgrn_ext", binary_dir())`
+   and dispatch via `metal::get_command_encoder`.
+
+### Until then
+
+Use `xgrn_ext.simdgroup_matmul_bf16` / `simdgroup_matmul_fp32` directly.
+They dispatch via `mx::fast::metal_kernel` from C++ — opaque to
+mx.compile but functionally correct and at parity with MLX matmul in
+isolation.
