@@ -17,6 +17,7 @@ dependencies = [
     "pandas>=2.2",
     "pillow>=10",
     "regex>=2024.0.0",
+    "safetensors>=0.4",
     "scipy>=1.11",
     "sentencepiece>=0.2",
     "timm==0.9.12",
