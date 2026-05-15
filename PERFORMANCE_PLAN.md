@@ -78,9 +78,9 @@ The winner — 2×4 register tile per simdgroup (8 accumulators) — packs enoug
 
 `simd_async_copy` for double-buffered loads was attempted but requires Metal 3's `simdgroup_event` header which is not present in MLX's current toolchain. Deferred until the toolchain catches up.
 
-Next steps in the project (now that matmul is competitive):
-1. **M3** — fuse rms_norm into the simdgroup matmul kernel. The phase-1 ssq reduction can write normed-x into threadgroup memory, which the simdgroup_load then reads as the A operand.
-2. **M5** — wire into `block()` behind `--fuse-qkv-metal` flag, run the strict `xgrn-parity --full-step` + `t2i-correct` gate.
+Steps after the matmul-kernel-itself converged:
+1. **M3+M5 (attempted, measured negative)** — wired `--fuse-qkv-metal` to route the 3 qkv projection matmuls through `simdgroup_matmul_bf16` in `_qkv_fused_bf16`. On t2i-correct strict gate: GRN +5.3 %, end-to-end +8.9 %, decode +88 % (!), CLIP 0.9904 → 0.9206. Decoder timing should be untouched by qkv; the regression points to the same integration tax A2 hit — an opaque Metal kernel inside the `mx.compile`'d visual pass breaks fusion/scheduling MLX's native matmul gets. Flag landed but stays opt-in only.
+2. **Real M3 (deferred, multi-session)** — fuse rms_norm into the simdgroup matmul kernel via threadgroup-memory phase-1 ssq reduction. Currently blocked by the same integration issue as M5 above — the kernel needs to either be re-expressed as an MLX op the compiler understands, or shipped via an MLX C++ extension (`mlx/extensions`) so it gets first-class treatment in the compile graph.
 
 **Track A summary:** the non-matmul fusion subspace is saturated. The simdgroup matmul project is now at the threshold where M3 fusion can deliver real wall reduction.
 

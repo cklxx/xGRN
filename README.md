@@ -2,10 +2,32 @@
 
 > **102x faster** than stock PyTorch/MPS (warm, debug profile) · **25x faster** cold start · native MLX + Metal
 
+<p align="center">
+  <img src="docs/screenshots/ui-hero.png" alt="xGRN UI — dark theme with prompt card, quality presets and live preview" width="100%">
+</p>
+
 Mac-specialized runtime for the official GRN T2I/T2V models. The GRN transformer
 and refinement loop run in MLX. Prompt embeddings are cached as MLX-readable
 artifacts after the first UMT5 run. HBQ decode uses a native MLX decoder by
 default, with the official PyTorch/MPS decoder kept as a fallback.
+
+## TL;DR — one command
+
+```bash
+uv run xgrn-app
+```
+
+First launch downloads the official GRN weights from HuggingFace, converts them
+to MLX artifacts, then opens the UI on <http://127.0.0.1:7860>. Subsequent
+launches reuse the cache and start in seconds.
+
+The UI hides every dtype / kernel-fusion / sampling knob behind an **Advanced**
+panel — pick a prompt, pick **Image** or **Video**, pick a **Quality** preset
+(Fast ≈ 1 s · Balanced ≈ 4 s · Quality ≈ 12 s, warm), hit **Generate**.
+
+<p align="center">
+  <img src="docs/screenshots/ui-create.png" alt="xGRN full Create tab" width="100%">
+</p>
 
 ## Speed at a glance
 
@@ -194,7 +216,8 @@ for the active task briefs.
 | `--fuse-rope-metal` (Track A1) | Fuses the 7-dispatch `apply_rope` into one Metal kernel. fp32 max-abs-diff `2.38e-7` vs `apply_rope`. Debug warm repeat-5 GRN median `0.772 → 0.763 s` (-1.17%). `t2i-correct` warm repeat-3 end-to-end `76.66 → 75.41 s` (-1.63%), CLIP positive `0.9904 → 0.8985`. The CLIP drop is the expected numerical-equivalent sample shift (fp32 rounding propagated through 50 stochastic refinement steps). Loose validator still passes 3/3; strict 0.93 gate missed by 0.03. Ship as opt-in only. |
 | `--fuse-residual-norm-metal` (Track A2) | Fuses `x + attn` and the post-attn `rms_norm` into one Metal kernel per block (multi-output, threadgroup reduction over hidden_dim=2304). fp32 max-abs-diff `9.54e-7` on both residual and normed outputs. **Measured negative result.** `t2i-correct` warm repeat-3 GRN `75.56 → 75.35 s` (-0.28%), end-to-end `76.66 → 76.55 s` (-0.15%), **RSS `+7.09 %` (+684 MB)** because the kernel's two output buffers cannot be freed in-place the way MLX's compile manages the residual reuse. CLIP `0.9904 → 0.9393`. A2 saves 12× fewer dispatches per step than A1 (28 vs 336), so the proportionally smaller speedup matches the dispatch-count theory cleanly — but the RSS cost makes it a bad default at this point. Flag kept off by default; do not enable. Useful as a template for future multi-output fused kernels (A3, A1-full). |
 | `fused_norm_qproj` (Track A1-full POC) | Fused `rms_norm(x) @ q_proj_weight` Metal kernel. One threadgroup per token, ssq reduction → normed-x in threadgroup memory → naive scalar dot-products for output columns. Parity vs reference at fp32 noise floor (max-abs-diff 2.86e-6). **Microbench: 9.4 ms / call, vs 1.2 ms / call for MLX's `rms_norm + matmul` = 8× slower.** Not wired into the block — naive scalar matmul cannot beat Apple's tuned GEMM. The kernel is kept as scaffolding for a future `simdgroup_matrix_storage` 8×8×8 rewrite that would close the matmul gap; that's a multi-day project, out of session scope. |
-| `simdgroup_matmul` (Track A1-full real foundation) | Module `xgrn_mlx/simdgroup_matmul.py` with byte-exact `simdgroup_matrix<float,8,8>` and `simdgroup_matrix<bfloat,8,8>` GEMMs that **match or beat MLX's tuned matmul on M4 Pro**. Winner layout: 2×2 simdgroup per threadgroup + 2×4 register tile per simdgroup (8 accumulators each). Microbench at the QKV shape (M=544, K=2304, N=2304): fp32 **1.045× of MLX matmul** (1235 µs vs 1182 µs), **bf16 0.975× of MLX bf16 matmul (1032 µs vs 1059 µs — 2.5% FASTER than MLX)**. Iteration log: 1-simdgroup-per-tile 4.39× → 2×2 simdgroup 2.13× → 2 acc/sg 1.82× → 4 acc (2×2 reg) 1.34× → **8 acc (2×4 reg) 1.05×**. 4×3 (12 acc) and 4×4 (16 acc) register tiles regressed (6.32×, 5.65×) because of register spill. The `simd_async_copy` path requires Metal 3's `simdgroup_event` header not present in MLX's current toolchain; deferred. Module **not yet wired into the GRN block** — that's M3 (fuse rms_norm into the kernel) + M5 (integrate behind `--fuse-qkv-metal` flag, strict gate). |
+| `simdgroup_matmul` (Track A1-full real foundation) | Module `xgrn_mlx/simdgroup_matmul.py` with byte-exact `simdgroup_matrix<float,8,8>` and `simdgroup_matrix<bfloat,8,8>` GEMMs that **match or beat MLX's tuned matmul on M4 Pro**. Winner layout: 2×2 simdgroup per threadgroup + 2×4 register tile per simdgroup (8 accumulators each). Microbench at the QKV shape (M=544, K=2304, N=2304): fp32 **1.045× of MLX matmul** (1235 µs vs 1182 µs), **bf16 0.975× of MLX bf16 matmul (1032 µs vs 1059 µs — 2.5% FASTER than MLX)**. Iteration log: 1-simdgroup-per-tile 4.39× → 2×2 simdgroup 2.13× → 2 acc/sg 1.82× → 4 acc (2×2 reg) 1.34× → **8 acc (2×4 reg) 1.05×**. 4×3 (12 acc) and 4×4 (16 acc) register tiles regressed (6.32×, 5.65×) because of register spill. The `simd_async_copy` path requires Metal 3's `simdgroup_event` header not present in MLX's current toolchain; deferred. |
+| `--fuse-qkv-metal` (Track A1-full M3+M5 integration) | Routes q/k/v projection matmuls in `qkv()` through `simdgroup_matmul_bf16`. Smoke test on debug 4-step generation succeeded; debug warm repeat-5 GRN -0.52 % (small but consistent). **But t2i-correct strict gate regressed badly**: GRN `75.56 → 79.57 s` (+5.31 %), end-to-end `76.66 → 83.45 s` (+8.86 %), decode `1.06 → 1.99 s` (+88 %, indirect — decoder doesn't use qkv), CLIP `0.9904 → 0.9206`. The decode jump despite untouched decoder code points at the same integration tax A2 hit: a custom Metal kernel can win in isolation but its opaque op inside the `mx.compile`'d visual pass breaks fusion / scheduling optimizations MLX's native matmul enables. Flag landed but **stays opt-in only**, default OFF, do not enable. The simdgroup matmul kernel itself remains useful as a building block; the integration story requires the visual-pass compile to learn about this op (or vice versa). |
 | `--stack-cfg-cache` | reduces Python arguments but debug warm repeat-3 regressed to 1.09 s |
 | `--min-change-frac 0.005` | did not early-stop on a 0.06M/20 smoke; not a default speed path |
 | `--track-token-confidence` | `0.25M/50` trace shows 50% of tokens exceed 0.9 confidence only at step 38, so sparse DUS is not justified yet |

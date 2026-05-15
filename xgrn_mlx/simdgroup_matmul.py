@@ -195,6 +195,23 @@ def simdgroup_matmul_fp32(A: mx.array, B: mx.array) -> mx.array:
     return outs[0] if isinstance(outs, (list, tuple)) else outs
 
 
+def simdgroup_matmul_bf16_padded(A: mx.array, B: mx.array) -> mx.array:
+    """bf16 matmul with auto-padding when M is not a multiple of 32.
+
+    The kernel requires M%32==0; this wrapper pads M up to the next multiple
+    of 32 with zeros, calls `simdgroup_matmul_bf16`, slices the output back.
+    Pad costs one dispatch; slice is a view. Useful when the matmul shape
+    upstream is fixed by data (e.g. visual_tokens + scale_token = 257).
+    """
+    M, K = A.shape
+    M_pad = (M + 31) // 32 * 32
+    if M_pad == M:
+        return simdgroup_matmul_bf16(A, B)
+    A_padded = mx.pad(A, [(0, M_pad - M), (0, 0)])
+    out = simdgroup_matmul_bf16(A_padded, B)
+    return out[:M]
+
+
 def simdgroup_matmul_bf16(A: mx.array, B: mx.array) -> mx.array:
     """Compute C = A @ B with bf16 inputs and fp32 accumulator.
 
