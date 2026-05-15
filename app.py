@@ -345,6 +345,7 @@ def _run_generation(body: GenerateBody) -> dict[str, Any]:
         "pn": pn,
         "steps": int(steps),
         "guidance": float(guidance),
+        "seed": int(body.seed),
         "elapsed_sec": round(elapsed, 2),
         "timings": {k: round(v, 3) for k, v in result.timings.items()},
         "raw_shape": list(result.raw_shape),

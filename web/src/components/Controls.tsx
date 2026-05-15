@@ -1,5 +1,5 @@
 import { Dice5, Image as ImageIcon, Video, Zap, Diamond, Sparkles } from 'lucide-react'
-import { Card, Segmented, FieldLabel, NativeSelect, Input, Button, Slider } from './ui'
+import { Card, Segmented, FieldLabel, NativeSelect, Input, Slider } from './ui'
 import type { Task, QualityKey, PresetMeta } from '../lib/api'
 import { randomSeed } from '../lib/api'
 
@@ -48,7 +48,7 @@ export function Controls({
         />
       </div>
 
-      <div className="grid grid-cols-[1fr_120px_auto] gap-2.5 items-end">
+      <div className="grid grid-cols-[1fr_140px] gap-2.5 items-end">
         <div>
           <FieldLabel>Aspect</FieldLabel>
           <NativeSelect
@@ -60,24 +60,22 @@ export function Controls({
         </div>
         <div>
           <FieldLabel>Seed</FieldLabel>
-          <Input
-            type="number"
-            value={state.seed}
-            onChange={(e) => setState({ seed: Number(e.currentTarget.value) || 0 })}
-            className="font-mono text-sm"
-          />
-        </div>
-        <div>
-          <FieldLabel>&nbsp;</FieldLabel>
-          <Button
-            variant="icon"
-            onClick={() => setState({ seed: randomSeed() })}
-            title="Random seed"
-            aria-label="Random seed"
-            className="h-10 w-10 px-0"
-          >
-            <Dice5 className="h-4 w-4" />
-          </Button>
+          <div className="relative">
+            <Input
+              type="number"
+              value={state.seed}
+              onChange={(e) => setState({ seed: Number(e.currentTarget.value) || 0 })}
+              className="font-mono text-sm pr-9"
+            />
+            <button
+              onClick={() => setState({ seed: randomSeed() })}
+              title="Random seed"
+              aria-label="Random seed"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 inline-flex items-center justify-center rounded text-muted hover:text-terra hover:bg-sub transition-colors"
+            >
+              <Dice5 className="h-4 w-4" strokeWidth={2.2} />
+            </button>
+          </div>
         </div>
       </div>
 

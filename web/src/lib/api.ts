@@ -38,6 +38,7 @@ export interface RunSummary {
   pn: string
   steps: number
   guidance: number
+  seed: number
   elapsed_sec: number
   timings: Record<string, number>
   raw_shape: number[]

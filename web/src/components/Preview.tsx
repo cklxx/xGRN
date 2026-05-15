@@ -1,8 +1,7 @@
-import { useState, useMemo } from 'react'
-import { Image as ImageIcon, Download, Maximize2, ChevronDown } from 'lucide-react'
+import { useMemo } from 'react'
+import { Image as ImageIcon, Download } from 'lucide-react'
 import { Card, Pill, Disclosure } from './ui'
 import type { GenerateResponse } from '../lib/api'
-import { cn } from '../lib/cn'
 
 export function Preview({
   result,
@@ -18,7 +17,6 @@ export function Preview({
   const imgSrc = result?.image_url ?? (loading ? null : initialImage)
   const videoSrc = result?.video_url ?? null
   const isVideo = !!videoSrc
-  const summary = result?.summary
 
   return (
     <div className="space-y-4">
@@ -69,7 +67,8 @@ export function Preview({
             <>
               <Pill tone="terra">{result.elapsed_sec.toFixed(1)}s</Pill>
               <Pill>{result.summary.pn} · {result.summary.steps} steps</Pill>
-              <Pill>seed {summary?.task === 'T2V' ? '·' : ''} {result.summary.task}</Pill>
+              <Pill>seed {result.summary.seed}</Pill>
+              <Pill>{result.summary.task}</Pill>
             </>
           ) : initialImage ? (
             <>
