@@ -83,7 +83,14 @@ Sweep on the standard `t2i-correct` prompt (0.25M / 50 steps, `--stable-shape-wa
 
 Wall savings scale roughly linearly with K (~1 s per K-step, consistent with cond-only visual forward costing about half of the CFG-batched two-lane forward). Quality is highly non-monotonic in K — K=15 passes solidly, K=17 collapses, K=20 partially recovers, K=25 fully collapses. Not the smooth quality curve the published MaskGIT late-CFG result predicts for our GRN-2B / 50-step / 0.25M setup.
 
-Decision: shipped as opt-in `--cfg-start-step K`, default K=0, **no default change**. K=15 is the recommended user-tunable speed knob on the standard prompt. Promoting K=15 as default requires a multi-prompt K-stability sweep clearing every prompt at 0.93.
+Decision: shipped as opt-in `--cfg-start-step K`, default K=0, **no default change**. K=15 is the recommended user-tunable speed knob on the standard prompt.
+
+A partial multi-prompt re-validation (orange_tabby only, with harder CLIP distractors `"random noise pattern"`, `"a black and white photograph"`) revealed two important things before the sweep was stopped to avoid concurrent GPU pressure:
+
+1. **The 0.93 gate was an artifact of the original validator's specific 4-negative set.** Against harder distractors, the same K=0 image scored `0.685` instead of `0.9904`. The strict 0.93 threshold cannot be re-applied to a different negative set without recalibration.
+2. **K=10 is not actually safe.** The K=10 image's top CLIP label flips to `"a blurry distorted image"` against the harder negatives — real, measurable quality cost that the original easy negative set hid. K=15 keeps the correct top label on this single prompt.
+
+These findings sharpen the recommendation: K=10 is *not* a safer middle ground, and any future default promotion of K=15 needs a multi-prompt sweep with prompt-specific positives, harder shared distractors, and a recalibrated gate (loose: top ∈ positives ∧ positive > negative ∧ positive ≥ 0.5; promote default only if every prompt clears it at both K=0 and K=15, and K=15 stays within 0.10 of K=0 per-prompt).
 
 Sub-tactic still proposed (not yet implemented): cache the visual-tower KV that does not depend on prompt text across CFG lanes so the uncond lane only pays the cross-attn delta. The cond-only branch also uses uncompiled `block_maybe_compiled`; compiling it for B=1 fixed shape would tighten the savings curve and remove the +0.8 GB RSS overhead during steps < K. Both belong to a future iteration.
 

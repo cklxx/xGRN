@@ -135,7 +135,7 @@ Driven by the M4 Pro dispatch-overhead hypothesis: ~200 Metal dispatches/step at
 - [x] Sweep `K ∈ {0, 5, 10, 15, 17, 20, 25}` on `t2i-correct`. K=15 saves 13.8% wall on the standard prompt (76.66 → 66.10 s end-to-end) with CLIP 0.9635. K=10 passes razor-thin (0.9332). K=17/20/25 fail strict 0.93 gate.
 - [x] Decision: ship `--cfg-start-step K` as opt-in flag, default K=0 (no default change). Quality is non-monotonic in K → prompt/seed sensitivity makes a default unsafe without a multi-prompt validation set.
 - [ ] CFG-lane KV-cache share for visual-tower KV that does not depend on prompt text — still proposed, not implemented.
-- [ ] Multi-prompt K stability sweep (5–10 prompts, K ∈ {10, 12, 15}). Required before any default promotion.
+- [~] Multi-prompt K stability sweep (5–10 prompts, K ∈ {10, 12, 15}). Started 2026-05-15; stopped after orange_tabby (only one prompt completed) because running a 35-min foreground GPU sweep alongside the live demo on port 7860 violates the "no concurrent GPU tests" rule. Two findings worth keeping: (a) the 0.93 strict gate does NOT transfer across CLIP negative sets — same K=0 image scored 0.685 against harder distractors vs 0.9904 against the original easy ones; (b) K=10's image's top CLIP label flips to "a blurry distorted image" against harder distractors, exposing quality cost the original gate hid. Required before any default promotion: rerun with prompt-specific positives + harder shared negatives, recalibrated loose gate.
 - [ ] Compile the cond-only `visual_forward_embedded` for B=1 fixed-shape too. Would tighten the K>0 savings curve and shrink the +0.8 GB RSS overhead during steps < K.
 
 ### Track D — Step distillation (future, training-side)
