@@ -23,6 +23,7 @@ def rms_norm(x: mx.array, weight: mx.array, eps: float = 1e-6) -> mx.array:
 _HAS_METAL_KERNEL = hasattr(mx.fast, "metal_kernel")
 _SWIGLU_KERNEL = None
 _FUSED_ROPE_KERNEL = None
+_FUSED_RESIDUAL_RMSNORM_KERNEL = None
 
 
 def fused_rope(x: mx.array, rope: mx.array) -> mx.array:
@@ -82,6 +83,95 @@ def fused_rope(x: mx.array, rope: mx.array) -> mx.array:
         verbose=False,
     )
     return out[0] if isinstance(out, (list, tuple)) else out
+
+
+def fused_residual_rmsnorm(
+    x: mx.array,
+    attn: mx.array,
+    weight: mx.array,
+    eps: float = 1e-6,
+) -> tuple[mx.array, mx.array]:
+    """One kernel: (residual, normed) = (x+attn, rms_norm(x+attn, weight)).
+
+    Replaces 2 dispatches (the elementwise residual add and the
+    `mx.fast.rms_norm` call) with one Metal kernel. Layout: one
+    threadgroup per token, threads cooperatively partial-sum the
+    squared residual into threadgroup memory, tree-reduce to a single
+    inv-sigma, then second pass writes both outputs. fp32 accumulation
+    independent of input dtype.
+
+    Inputs:
+      x      : [..., H] residual to add to
+      attn   : [..., H] attention output, same shape as x
+      weight : [H]       rms-norm scale
+    Outputs:
+      residual : [..., H] = x + attn, dtype matches x
+      normed   : [..., H] = (x + attn) * rsqrt(mean((x+attn)^2) + eps) * weight
+                 dtype matches x
+    """
+    if not _HAS_METAL_KERNEL:
+        residual = x + attn
+        return residual, rms_norm(residual, weight, eps)
+    global _FUSED_RESIDUAL_RMSNORM_KERNEL
+    if _FUSED_RESIDUAL_RMSNORM_KERNEL is None:
+        # EPS is inlined via Python format because mx.fast.metal_kernel
+        # template params accept only dtype / int / bool, not float.
+        source_template = """
+            float kEpsilon = {eps_literal}f;
+
+            uint tid = thread_position_in_threadgroup.x;
+            uint token_id = threadgroup_position_in_grid.x;
+            uint base = token_id * H;
+
+            threadgroup float ssq_shared[TPG];
+
+            float ssq = 0.0f;
+            for (uint i = tid; i < H; i += TPG) {{
+                float r = static_cast<float>(x[base + i]) + static_cast<float>(attn[base + i]);
+                ssq += r * r;
+            }}
+            ssq_shared[tid] = ssq;
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+
+            for (uint stride = TPG >> 1; stride > 0; stride >>= 1) {{
+                if (tid < stride) {{
+                    ssq_shared[tid] += ssq_shared[tid + stride];
+                }}
+                threadgroup_barrier(mem_flags::mem_threadgroup);
+            }}
+            float mean_sq = ssq_shared[0] / static_cast<float>(H);
+            float inv_sigma = metal::rsqrt(mean_sq + kEpsilon);
+
+            for (uint i = tid; i < H; i += TPG) {{
+                float r = static_cast<float>(x[base + i]) + static_cast<float>(attn[base + i]);
+                residual[base + i] = static_cast<T>(r);
+                float n = r * inv_sigma * static_cast<float>(weight[i]);
+                normed[base + i] = static_cast<T>(n);
+            }}
+        """
+        source = source_template.format(eps_literal=repr(float(eps)))
+        _FUSED_RESIDUAL_RMSNORM_KERNEL = mx.fast.metal_kernel(
+            name="xgrn_fused_residual_rmsnorm",
+            input_names=["x", "attn", "weight"],
+            output_names=["residual", "normed"],
+            source=source,
+            header="#include <metal_math>\n",
+        )
+    H = x.shape[-1]
+    num_tokens = x.size // H
+    TPG = 256
+    outs = _FUSED_RESIDUAL_RMSNORM_KERNEL(
+        inputs=[x, attn, weight],
+        template=[("T", x.dtype), ("H", H), ("TPG", TPG)],
+        output_shapes=[x.shape, x.shape],
+        output_dtypes=[x.dtype, x.dtype],
+        grid=(num_tokens * TPG, 1, 1),
+        threadgroup=(TPG, 1, 1),
+        verbose=False,
+    )
+    if isinstance(outs, (list, tuple)):
+        return outs[0], outs[1]
+    return outs.residual, outs.normed
 
 
 def swiglu(gate: mx.array, up: mx.array) -> mx.array:
@@ -162,6 +252,7 @@ class GRN2BMLX:
         fuse_mlp_gate_up: bool = False,
         fuse_swiglu_metal: bool = False,
         fuse_rope_metal: bool = False,
+        fuse_residual_norm_metal: bool = False,
         stack_cfg_cache: bool = False,
     ):
         self.config = config
@@ -179,6 +270,7 @@ class GRN2BMLX:
         self.fuse_mlp_gate_up = fuse_mlp_gate_up
         self.fuse_swiglu_metal = fuse_swiglu_metal
         self.fuse_rope_metal = fuse_rope_metal
+        self.fuse_residual_norm_metal = fuse_residual_norm_metal
         self.stack_cfg_cache = stack_cfg_cache
         self.w32: dict[str, mx.array] = {}
         self.w_compute: dict[str, mx.array] = {}
@@ -379,8 +471,15 @@ class GRN2BMLX:
     ) -> tuple[mx.array, mx.array, mx.array]:
         h = rms_norm(x, self.w[self.key(block, "input_layernorm.weight")])
         attn, cur_k, cur_v = self.attention(h, block, rope, prefix_k, prefix_v, mask)
-        x = x + attn
-        h = rms_norm(x, self.w[self.key(block, "post_attention_layernorm.weight")])
+        if self.fuse_residual_norm_metal:
+            # The kernel does fp32 accumulation internally and casts the
+            # weight inline via static_cast<float>, so we can pass the raw
+            # (possibly fp16) weight directly without an extra astype dispatch.
+            post_w = self.w[self.key(block, "post_attention_layernorm.weight")]
+            x, h = fused_residual_rmsnorm(x, attn, post_w)
+        else:
+            x = x + attn
+            h = rms_norm(x, self.w[self.key(block, "post_attention_layernorm.weight")])
         x = x + self.mlp(h, block)
         return x, cur_k, cur_v
 

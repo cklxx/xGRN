@@ -161,7 +161,7 @@ That single fact decides what we try next:
 |---|---|---:|---|
 | A1-lite | Custom `mx.fast.metal_kernel`: fused `apply_rope` (one kernel replaces 7 elementwise dispatches per Q/K rotation) | -1.63% wall on `t2i-correct`, CLIP variance shift; **shipped opt-in** via `--fuse-rope-metal` |
 | A1-full | Fused `rmsnorm + qkv_proj + rope` (with simdgroup matmul) | ~30–40 ms/step | proposed |
-| A2 | Custom Metal: fused `attn_out + residual + pre-MLP rmsnorm` | ~10–15 ms/step | proposed |
+| A2 | Custom Metal: fused `x + attn` and post-attn `rms_norm` (multi-output threadgroup-reduce kernel) | **measured: -0.28% GRN, +7% RSS** — flag landed but **stays opt-in only**, kernel kept as template for A3 / A1-full |
 | A3 | Custom Metal: fused sampling + mask update with `atomic_outputs` | ~5–10 ms/step | proposed |
 | B | Whole-stack `mx.compile(shapeless=True)` across all 28 blocks | cross-block fusion | active, codex tmux |
 | C | Late-step-only CFG (`--cfg-start-step K`, skip uncond before step K) | 13.8 % wall at K=15 on the standard prompt | shipped opt-in, K=0 default, see Experiment Outcomes |
@@ -192,6 +192,7 @@ for the active task briefs.
 | `--precompute-pt-embed` | debug warm repeat-3 regressed to 1.09 s; default remains on-demand |
 | `--fuse-swiglu-metal` | numeric diff `2.38e-7`, but debug warm repeat-3 regressed to 1.11 s |
 | `--fuse-rope-metal` (Track A1) | Fuses the 7-dispatch `apply_rope` into one Metal kernel. fp32 max-abs-diff `2.38e-7` vs `apply_rope`. Debug warm repeat-5 GRN median `0.772 → 0.763 s` (-1.17%). `t2i-correct` warm repeat-3 end-to-end `76.66 → 75.41 s` (-1.63%), CLIP positive `0.9904 → 0.8985`. The CLIP drop is the expected numerical-equivalent sample shift (fp32 rounding propagated through 50 stochastic refinement steps). Loose validator still passes 3/3; strict 0.93 gate missed by 0.03. Ship as opt-in only. |
+| `--fuse-residual-norm-metal` (Track A2) | Fuses `x + attn` and the post-attn `rms_norm` into one Metal kernel per block (multi-output, threadgroup reduction over hidden_dim=2304). fp32 max-abs-diff `9.54e-7` on both residual and normed outputs. **Measured negative result.** `t2i-correct` warm repeat-3 GRN `75.56 → 75.35 s` (-0.28%), end-to-end `76.66 → 76.55 s` (-0.15%), **RSS `+7.09 %` (+684 MB)** because the kernel's two output buffers cannot be freed in-place the way MLX's compile manages the residual reuse. CLIP `0.9904 → 0.9393`. A2 saves 12× fewer dispatches per step than A1 (28 vs 336), so the proportionally smaller speedup matches the dispatch-count theory cleanly — but the RSS cost makes it a bad default at this point. Flag kept off by default; do not enable. Useful as a template for future multi-output fused kernels (A3, A1-full). |
 | `--stack-cfg-cache` | reduces Python arguments but debug warm repeat-3 regressed to 1.09 s |
 | `--min-change-frac 0.005` | did not early-stop on a 0.06M/20 smoke; not a default speed path |
 | `--track-token-confidence` | `0.25M/50` trace shows 50% of tokens exceed 0.9 confidence only at step 38, so sparse DUS is not justified yet |
@@ -200,8 +201,9 @@ for the active task briefs.
 Regressed experiments remain as opt-in flags for investigation. `--no-compile-visual-pass`,
 `--compile-refinement-update`, `--sampling-mode argmax`, `--sampling-mode binary`,
 `--linear-quantization`, `--mask-schedule dus`, `--precompute-pt-embed`, `--fuse-swiglu-metal`,
-`--stack-cfg-cache`, `--compute-dtype fp32`, `--decoder-backend mps`, `--cfg-start-step`, and
-`--fuse-rope-metal` are kept for parity and debug comparison. `--weights-dtype fp16` is the strongest
+`--stack-cfg-cache`, `--compute-dtype fp32`, `--decoder-backend mps`, `--cfg-start-step`,
+`--fuse-rope-metal`, and `--fuse-residual-norm-metal` are kept for parity and debug
+comparison. `--weights-dtype fp16` is the strongest
 low-memory correct path, but fp32 weights stay default for the best speed and
 semantic margin.
 

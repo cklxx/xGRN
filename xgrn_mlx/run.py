@@ -63,6 +63,7 @@ def _model(
     fuse_mlp_gate_up: bool = False,
     fuse_swiglu_metal: bool = False,
     fuse_rope_metal: bool = False,
+    fuse_residual_norm_metal: bool = False,
     stack_cfg_cache: bool = False,
 ) -> GRN2BMLX:
     task = task.lower()
@@ -72,6 +73,7 @@ def _model(
         f"compile_visual={compile_visual_pass}:compile_cfg_logits={compile_cfg_logits}:"
         f"compile_update={compile_refinement_update}:fuse_mlp_gate_up={fuse_mlp_gate_up}:"
         f"fuse_swiglu_metal={fuse_swiglu_metal}:fuse_rope_metal={fuse_rope_metal}:"
+        f"fuse_residual_norm_metal={fuse_residual_norm_metal}:"
         f"stack_cfg_cache={stack_cfg_cache}"
     )
     if key not in _MODEL_CACHE:
@@ -98,6 +100,7 @@ def _model(
             fuse_mlp_gate_up=fuse_mlp_gate_up,
             fuse_swiglu_metal=fuse_swiglu_metal,
             fuse_rope_metal=fuse_rope_metal,
+            fuse_residual_norm_metal=fuse_residual_norm_metal,
             stack_cfg_cache=stack_cfg_cache,
         )
     return _MODEL_CACHE[key]
@@ -193,6 +196,7 @@ def generate_mac(
     fuse_mlp_gate_up: bool = False,
     fuse_swiglu_metal: bool = False,
     fuse_rope_metal: bool = False,
+    fuse_residual_norm_metal: bool = False,
     stack_cfg_cache: bool = False,
     detailed_stats: bool = False,
     exact_step_sync: bool = False,
@@ -243,6 +247,7 @@ def generate_mac(
         fuse_mlp_gate_up=fuse_mlp_gate_up,
         fuse_swiglu_metal=fuse_swiglu_metal,
         fuse_rope_metal=fuse_rope_metal,
+        fuse_residual_norm_metal=fuse_residual_norm_metal,
         stack_cfg_cache=stack_cfg_cache,
     )
     timings["model_load_sec"] = time.perf_counter() - stage
@@ -426,6 +431,7 @@ def main() -> None:
     parser.add_argument("--fuse-mlp-gate-up", action="store_true", help="Experimental: compute MLP gate/up projections as one wider matmul.")
     parser.add_argument("--fuse-swiglu-metal", action="store_true", help="Experimental: use a custom Metal kernel for silu(gate) * up.")
     parser.add_argument("--fuse-rope-metal", action="store_true", help="Experimental: fold the 7-dispatch apply_rope into one Metal kernel for Q/K rotation.")
+    parser.add_argument("--fuse-residual-norm-metal", action="store_true", help="Experimental: fold (x + attn) and post-attn rms_norm into one Metal kernel per block.")
     parser.add_argument("--stack-cfg-cache", action="store_true", help="Experimental: pass stacked CFG K/V cache tensors to the compiled visual pass.")
     parser.add_argument("--detailed-stats", action="store_true", help="Compute entropy and detailed per-step stats; slower because it syncs every step.")
     parser.add_argument("--exact-step-sync", action="store_true", help="Use sampled mask mean as the next step token, matching the debug parity path but adding a per-step sync.")
@@ -491,6 +497,7 @@ def main() -> None:
         fuse_mlp_gate_up=args.fuse_mlp_gate_up,
         fuse_swiglu_metal=args.fuse_swiglu_metal,
         fuse_rope_metal=args.fuse_rope_metal,
+        fuse_residual_norm_metal=args.fuse_residual_norm_metal,
         stack_cfg_cache=args.stack_cfg_cache,
         detailed_stats=args.detailed_stats,
         exact_step_sync=args.exact_step_sync,
