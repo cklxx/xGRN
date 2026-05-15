@@ -21,6 +21,19 @@ execute_process(
 list(APPEND CMAKE_PREFIX_PATH "${NB_DIR}")
 find_package(nanobind CONFIG REQUIRED)
 
+# Build xgrn_ext.metallib from cpp/xgrn_ext.metal using MLX's helper.
+# Requires the Metal Toolchain xcodebuild component (`xcodebuild
+# -downloadComponent MetalToolchain`). Without that the macro will
+# error out at build time -- gracefully expected.
+include("${MLX_DIR}/extension.cmake")
+mlx_build_metallib(
+  TARGET xgrn_ext_metallib
+  TITLE xgrn_ext
+  SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cpp/xgrn_ext.metal"
+  INCLUDE_DIRS "${MLX_INCLUDE_DIRS}"
+  OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 nanobind_add_module(_core
   NB_STATIC
   STABLE_ABI
@@ -31,6 +44,9 @@ nanobind_add_module(_core
   cpp/simdgroup_matmul.cpp
   cpp/simdgroup_matmul_primitive.cpp
 )
+# Ensure the metallib is built before linking, so eval_gpu can find it
+# next to the .so at runtime.
+add_dependencies(_core xgrn_ext_metallib)
 
 # Drop the built .so into the importable Python package dir so
 # `import xgrn_ext` works without a sys.path dance.

@@ -76,72 +76,65 @@ C = xgrn_ext.simdgroup_matmul_bf16(A, B)  # [544, 2304] fp32
 The extension is currently consumed by `xgrn_mlx.grn._qkv_fused_ext`
 when the `--fuse-qkv-ext` runtime flag is on (default OFF).
 
-## Custom Primitive subclass — wired, eval_gpu blocked on Metal Toolchain
+## Custom Primitive subclass — landed end-to-end
 
 `xgrn_ext.simdgroup_matmul_primitive(a, b)` is wired through
-`xgrn_ext/cpp/simdgroup_matmul_primitive.{h,cpp}` as a `mlx::core::Primitive`
-subclass named `SimdgroupMatmul`. mx.compile sees it as a NAMED primitive
-in the graph, and shape inference works (`array.shape == (M, N)`,
-`array.dtype == float32`). What is NOT implemented is `eval_gpu`.
+`xgrn_ext/cpp/simdgroup_matmul_primitive.{h,cpp}` as a
+`mlx::core::Primitive` subclass named `SimdgroupMatmul`, with a working
+axpby-style `eval_gpu` that dispatches against the precompiled
+`xgrn_ext.metallib` (built at extension build time by MLX's
+`mlx_build_metallib` macro, which requires the Metal Toolchain xcodebuild
+component).
 
-### Why eval_gpu can't be implemented in this environment
+### What works
 
-Two approaches tried, both fail:
+- `xgrn_ext.metallib` built from `cpp/xgrn_ext.metal` (12 KB)
+- `eval_gpu` loads the metallib via `metal::device(s).get_library("xgrn_ext",
+  binary_dir())`, allocates output via `out.set_data(allocator::malloc)`,
+  binds inputs via `set_input_array` / `set_bytes`, dispatches via
+  `dispatch_threads`
+- Byte-exact parity vs the raw kernel and within bf16 floor vs MLX matmul
+- mx.compile sees `SimdgroupMatmul` as a NAMED primitive in the graph
 
-1. **Call `mx::fast::metal_kernel(...)(...)` from inside eval_gpu**, then
-   `mx::eval` the result and `outputs[0].copy_shared_buffer(result)`.
-   Crashes with a Metal assertion:
-   ```
-   -[_MTLCommandBuffer addCompletedHandler:]:1011:
-   failed assertion `Completed handler provided after commit call'
-   ```
-   Forcing `mx::eval` inside an already-running primitive's eval_gpu
-   creates a nested command-buffer lifecycle the Metal runtime rejects.
+### What's NOT a free win
 
-2. **Same trick with `mlx::core::matmul`** (i.e. just defer to MLX matmul
-   inside eval_gpu) — same assertion. The problem isn't *which op*
-   produces the result, it's the recursive `mx::eval` from eval_gpu.
+Integration into the GRN block via `--fuse-qkv-prim` measured a **regression**:
+t2i-correct GRN +7.30 %, end-to-end +8.74 %, decode +45.66 %, CLIP
+0.9904 → 0.9206. Worse than the raw-kernel path (`--fuse-qkv-ext` at
++3.77 % GRN, +15.23 % decode).
 
-The correct pattern, used by MLX's own primitives and the upstream
-`examples/extensions/axpby`:
+Why the axpby-style eval_gpu is slower per-call than `mx::fast::metal_kernel`:
 
-```cpp
-void SimdgroupMatmul::eval_gpu(...) {
-  outputs[0].set_data(allocator::malloc(nbytes));
-  auto lib = metal::device(s).get_library("xgrn_ext", binary_dir());
-  auto kernel = lib.get_kernel("xgrn_sgm_bf16");
-  auto& encoder = metal::get_command_encoder(s);
-  encoder.set_compute_pipeline_state(kernel);
-  // ... bind buffers + dispatch ...
-}
+- per-call `allocator::malloc` allocation (vs CustomKernel's pooled allocator)
+- per-call `set_input_array` × 3 + `set_bytes` × 3 + `dispatch_threads`
+- no encoder batching across calls
+
+These add up to high overhead at 1400 qkv calls / generation. MLX's
+internal CustomKernel infrastructure presumably amortizes these via
+buffer-pool reuse and encoder batching that's not exposed in the public
+extension API.
+
+### Earlier blocker (now resolved)
+
+For reference: `eval_gpu` was first attempted by calling
+`mx::fast::metal_kernel(...)(...)` *from inside* eval_gpu, then
+`mx::eval` on the result. That crashes the Metal runtime:
+
+```
+-[_MTLCommandBuffer addCompletedHandler:]:1011:
+failed assertion `Completed handler provided after commit call'
 ```
 
-This requires a **precompiled `xgrn_ext.metallib`** built at extension
-build time via the `mlx_build_metallib` CMake macro (from `extension.cmake`).
-That macro shells out to `xcrun -sdk macosx metal`, and on this Mac:
+Forcing `mx::eval` inside an already-running primitive's eval_gpu creates
+a nested command-buffer lifecycle the Metal runtime rejects. The axpby
+pattern avoids this by running everything on the parent stream's
+existing encoder.
 
-```
-$ xcrun -sdk macosx metal -c test.metal
-error: cannot execute tool 'metal' due to missing Metal Toolchain;
-use: xcodebuild -downloadComponent MetalToolchain
-```
+### Status
 
-### To unblock
-
-```bash
-sudo xcodebuild -downloadComponent MetalToolchain
-```
-
-After that:
-1. Add a `cpp/xgrn_ext.metal` with `xgrn_sgm_fp32` / `xgrn_sgm_bf16` kernels
-2. Add `mlx_build_metallib(... TARGET xgrn_ext_metallib SOURCES cpp/xgrn_ext.metal ...)` to `CMakeLists.txt`
-3. Implement `SimdgroupMatmul::eval_gpu` to load the metallib via
-   `mlx::core::metal::device(s).get_library("xgrn_ext", binary_dir())`
-   and dispatch via `metal::get_command_encoder`.
-
-### Until then
-
-Use `xgrn_ext.simdgroup_matmul_bf16` / `simdgroup_matmul_fp32` directly.
-They dispatch via `mx::fast::metal_kernel` from C++ — opaque to
-mx.compile but functionally correct and at parity with MLX matmul in
-isolation.
+The Track A1-full infrastructure is now structurally complete across every
+available framework level: raw `mx.fast.metal_kernel` (Python + C++),
+manual MLX-only fusion, and axpby-style Custom Primitive subclass. None
+deliver a net positive at the t2i-correct gate. The bottleneck is the
+integration tax `mx.fast.metal_kernel`-class custom kernels pay inside
+the visual_pass compile, regardless of how they're dispatched.

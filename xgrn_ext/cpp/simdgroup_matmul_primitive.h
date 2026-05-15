@@ -1,20 +1,24 @@
-// SimdgroupMatmul as an mx::fast::Custom subclass.
+// SimdgroupMatmul as a real MLX Primitive subclass.
 //
 // The earlier `simdgroup_matmul.{h,cpp}` exposed the kernel by calling
 // mx::fast::metal_kernel(...) directly each invocation -- the resulting op
 // is treated as opaque by mx.compile, which causes integration regressions
 // (decode +88% etc.) when wired into the GRN block.
 //
-// This subclass approach gives the kernel:
-//   - a NAMED primitive in the compile graph (DEFINE_NAME(SimdgroupMatmul))
-//   - a fallback_ MLX op chain ((a @ b).astype(out_dtype)) that mx.compile
-//     traces for shape inference / fusion
-//   - eval_gpu that dispatches the actual kernel via mx::fast::metal_kernel,
-//     copying the result via array::copy_shared_buffer
+// This subclass approach (axpby-pattern):
+//   - Inherits mlx::core::Primitive directly (Custom's vtable is local in
+//     libmlx so out-of-tree subclasses can't link Custom).
+//   - eval_gpu loads xgrn_ext.metallib (built at extension build time via
+//     MLX's mlx_build_metallib macro) and dispatches the kernel using
+//     mlx::core::metal::get_command_encoder. No nested mx::eval, no
+//     command-buffer lifecycle violation.
+//   - mx.compile sees a NAMED primitive ("SimdgroupMatmul") in the graph
+//     instead of an opaque CustomKernel, which is the integration story
+//     we needed.
 //
 // Same 2x2 simdgroup + 2x4 register tile (8 accumulators) layout as the
 // existing kernel. Constraints: M % 32 == 0, N % 64 == 0, K % 8 == 0,
-// inputs fp32 or bf16.
+// inputs fp32 or bf16; output always fp32.
 
 #pragma once
 

@@ -131,6 +131,7 @@ def run_profile(
     fuse_qkv_metal: bool = False,
     fuse_qkv_concat: bool = False,
     fuse_qkv_ext: bool = False,
+    fuse_qkv_prim: bool = False,
     stack_cfg_cache: bool = False,
     detailed_stats: bool = False,
     exact_step_sync: bool = False,
@@ -173,6 +174,7 @@ def run_profile(
         fuse_qkv_metal=fuse_qkv_metal,
         fuse_qkv_concat=fuse_qkv_concat,
         fuse_qkv_ext=fuse_qkv_ext,
+        fuse_qkv_prim=fuse_qkv_prim,
         stack_cfg_cache=stack_cfg_cache,
         detailed_stats=detailed_stats,
         exact_step_sync=exact_step_sync,
@@ -213,6 +215,7 @@ def run_profile(
         "fuse_qkv_metal": fuse_qkv_metal,
         "fuse_qkv_concat": fuse_qkv_concat,
         "fuse_qkv_ext": fuse_qkv_ext,
+        "fuse_qkv_prim": fuse_qkv_prim,
         "stack_cfg_cache": stack_cfg_cache,
         "detailed_stats": detailed_stats,
         "exact_step_sync": exact_step_sync,
@@ -315,6 +318,7 @@ def main() -> None:
     parser.add_argument("--fuse-qkv-metal", action="store_true", help="Track A1-full M3/M5: route q/k/v projection matmuls through simdgroup_matmul_bf16.")
     parser.add_argument("--fuse-qkv-concat", action="store_true", help="Track A1-full M3 alt: one MLX matmul against concatenated [q|k|v] per block.")
     parser.add_argument("--fuse-qkv-ext", action="store_true", help="Track A1-full M3 v2: route q/k/v matmuls through the xgrn_ext C++ extension (simdgroup_matmul_bf16).")
+    parser.add_argument("--fuse-qkv-prim", action="store_true", help="Track A1-full M5 v3: route q/k/v matmuls through xgrn_ext.simdgroup_matmul_primitive (axpby-style Custom Primitive).")
     parser.add_argument("--stack-cfg-cache", action="store_true", help="Experimental: pass stacked CFG K/V cache tensors to the compiled visual pass.")
     parser.add_argument("--detailed-stats", action="store_true", help="Compute entropy and detailed per-step stats; slower because it syncs every step.")
     parser.add_argument("--exact-step-sync", action="store_true", help="Use sampled mask mean as the next step token, matching the debug parity path but adding a per-step sync.")
@@ -388,6 +392,7 @@ def main() -> None:
                 fuse_qkv_metal=args.fuse_qkv_metal,
                 fuse_qkv_concat=args.fuse_qkv_concat,
                 fuse_qkv_ext=args.fuse_qkv_ext,
+                fuse_qkv_prim=args.fuse_qkv_prim,
                 stack_cfg_cache=args.stack_cfg_cache,
                 detailed_stats=args.detailed_stats,
                 exact_step_sync=args.exact_step_sync,
@@ -421,6 +426,7 @@ def main() -> None:
                 fuse_qkv_metal=args.fuse_qkv_metal,
                 fuse_qkv_concat=args.fuse_qkv_concat,
                 fuse_qkv_ext=args.fuse_qkv_ext,
+                fuse_qkv_prim=args.fuse_qkv_prim,
                 stack_cfg_cache=args.stack_cfg_cache,
                 detailed_stats=args.detailed_stats,
                 exact_step_sync=args.exact_step_sync,

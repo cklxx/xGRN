@@ -366,6 +366,7 @@ class GRN2BMLX:
         fuse_qkv_metal: bool = False,
         fuse_qkv_concat: bool = False,
         fuse_qkv_ext: bool = False,
+        fuse_qkv_prim: bool = False,
         stack_cfg_cache: bool = False,
     ):
         self.config = config
@@ -387,6 +388,7 @@ class GRN2BMLX:
         self.fuse_qkv_metal = fuse_qkv_metal
         self.fuse_qkv_concat = fuse_qkv_concat
         self.fuse_qkv_ext = fuse_qkv_ext
+        self.fuse_qkv_prim = fuse_qkv_prim
         self.w_qkv_concat: dict[int, mx.array] = {}
         self.stack_cfg_cache = stack_cfg_cache
         self.w32: dict[str, mx.array] = {}
@@ -581,6 +583,58 @@ class GRN2BMLX:
                     v = v + bias.reshape(1, 1, n_kv, head_dim)
         return q, k, v
 
+    def _qkv_fused_prim(
+        self,
+        x: mx.array,
+        block: int,
+        b: int,
+        l: int,
+        cfg: GRN2BConfig,
+    ) -> tuple[mx.array, mx.array, mx.array]:
+        """Track A1-full M5 v3: q/k/v matmuls via the xgrn_ext NAMED primitive.
+
+        Same plumbing as `_qkv_fused_ext` (pad once, three matmuls, slice
+        back) but the matmul itself goes through
+        `xgrn_ext.simdgroup_matmul_primitive`, an axpby-style Custom
+        Primitive that:
+          - shows up in the mx.compile graph as a NAMED op
+            ("SimdgroupMatmul") instead of an opaque CustomKernel from
+            mx::fast::metal_kernel
+          - dispatches via metal::get_command_encoder against a
+            pre-compiled xgrn_ext.metallib, on the same command buffer
+            as surrounding MLX ops (no nested command-buffer lifecycle)
+        The hypothesis: this is the integration shape that finally lets
+        the visual_pass compile schedule the kernel alongside MLX matmul.
+        """
+        from xgrn_ext import simdgroup_matmul_primitive as _prim_bf16
+        h = x.shape[-1]
+        M = b * l
+        x_flat = x.reshape(M, h)
+        x_bf16 = x_flat.astype(mx.bfloat16)
+        M_pad = (M + 31) // 32 * 32
+        if M_pad != M:
+            x_bf16 = mx.pad(x_bf16, [(0, M_pad - M), (0, 0)])
+        q_w = self.compute_weight(f"{self.key(block, 'attn.q_proj')}.weight")
+        k_w = self.compute_weight(f"{self.key(block, 'attn.k_proj')}.weight")
+        v_w = self.compute_weight(f"{self.key(block, 'attn.v_proj')}.weight")
+        q_full = _prim_bf16(x_bf16, q_w)
+        k_full = _prim_bf16(x_bf16, k_w)
+        v_full = _prim_bf16(x_bf16, v_w)
+        for tag, full in (("q_proj", q_full), ("k_proj", k_full), ("v_proj", v_full)):
+            bias_name = f"{self.key(block, f'attn.{tag}')}.bias"
+            if bias_name in self.w:
+                # Bias add via plain mx ops; primitive output is fp32.
+                if tag == "q_proj":
+                    q_full = q_full + self.fp32_weight(bias_name)
+                elif tag == "k_proj":
+                    k_full = k_full + self.fp32_weight(bias_name)
+                else:
+                    v_full = v_full + self.fp32_weight(bias_name)
+        q = q_full[:M].reshape(b, l, cfg.num_heads, cfg.head_dim)
+        k = k_full[:M].reshape(b, l, cfg.num_key_value_heads, cfg.head_dim)
+        v = v_full[:M].reshape(b, l, cfg.num_key_value_heads, cfg.head_dim)
+        return q, k, v
+
     def _qkv_fused_ext(
         self,
         x: mx.array,
@@ -690,6 +744,12 @@ class GRN2BMLX:
         cfg = self.config
         b, l, _ = x.shape
         if (
+            self.fuse_qkv_prim
+            and self.compute_dtype == mx.bfloat16
+            and self.linear_quantization == "none"
+        ):
+            q, k, v = self._qkv_fused_prim(x, block, b, l, cfg)
+        elif (
             self.fuse_qkv_ext
             and self.compute_dtype == mx.bfloat16
             and self.linear_quantization == "none"

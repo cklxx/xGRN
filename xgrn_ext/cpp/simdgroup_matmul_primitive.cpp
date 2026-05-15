@@ -9,10 +9,34 @@
 
 #include "simdgroup_matmul_primitive.h"
 
+#include <mlx/allocator.h>
+#include <mlx/backend/metal/device.h>
 #include <mlx/dtype.h>
 #include <mlx/utils.h>
 
+#include <dlfcn.h>
+#include <filesystem>
+#include <stdexcept>
+#include <string>
+
 namespace xgrn_ext {
+
+namespace {
+
+// Where is our .metallib? It sits next to the loaded _core.*.so.
+std::string current_binary_dir() {
+  static std::string dir = []() {
+    Dl_info info;
+    if (!dladdr(reinterpret_cast<void*>(&current_binary_dir), &info)) {
+      throw std::runtime_error(
+          "xgrn_ext: dladdr failed -- cannot locate _core.so");
+    }
+    return std::filesystem::path(info.dli_fname).parent_path().string();
+  }();
+  return dir;
+}
+
+}  // namespace
 
 void SimdgroupMatmul::eval_cpu(
     const std::vector<mlx::core::array>& /*inputs*/,
@@ -23,47 +47,47 @@ void SimdgroupMatmul::eval_cpu(
 }
 
 void SimdgroupMatmul::eval_gpu(
-    const std::vector<mlx::core::array>& /*inputs*/,
-    std::vector<mlx::core::array>& /*outputs*/) {
-  // *** BLOCKED on Metal Toolchain install. ***
-  //
-  // Two paths attempted, both fail on this machine:
-  //   1. mx::fast::metal_kernel(...)(...) from inside eval_gpu, followed
-  //      by mx::eval to materialize, then copy_shared_buffer. Crashes
-  //      with a Metal assertion:
-  //        "-[_MTLCommandBuffer addCompletedHandler:]:1011:
-  //         Completed handler provided after commit call"
-  //      because forcing mx::eval inside an already-running primitive's
-  //      eval_gpu creates a nested command-buffer lifecycle the Metal
-  //      runtime rejects.
-  //   2. Same trick with mlx::core::matmul instead of metal_kernel.
-  //      Same assertion -- the issue is the mx::eval call from inside
-  //      eval_gpu, not which op produces the array.
-  //
-  // The correct pattern, demonstrated by MLX's own primitives and by
-  // the upstream `axpby` example, is:
-  //   - outputs[0].set_data(allocator::malloc(nbytes));
-  //   - load the kernel from a precompiled .metallib via
-  //     mlx::core::metal::device(s).get_library(name, path);
-  //   - dispatch via metal::get_command_encoder(s);
-  //
-  // That requires the Metal Toolchain xcodebuild component which is
-  // NOT installed on this Mac:
-  //   $ xcrun -sdk macosx metal -c test.metal
-  //   error: cannot execute tool 'metal' due to missing Metal Toolchain;
-  //   use: xcodebuild -downloadComponent MetalToolchain
-  //
-  // Until that component is installed and `mlx_build_metallib` can
-  // produce `xgrn_ext.metallib`, this primitive is a SHAPE-INFERENCE-ONLY
-  // declaration. The Python facade still exposes the raw kernel via
-  // simdgroup_matmul_bf16/fp32 which works fine -- those just don't get
-  // the named-primitive treatment in mx.compile.
-  throw std::runtime_error(
-      "SimdgroupMatmul::eval_gpu: blocked on Metal Toolchain install. "
-      "Use xgrn_ext.simdgroup_matmul_bf16 / simdgroup_matmul_fp32 instead; "
-      "they dispatch via mx::fast::metal_kernel at the Python level and work "
-      "today. See xgrn_ext/cpp/simdgroup_matmul_primitive.cpp eval_gpu "
-      "comment block for the full diagnostic and the path forward.");
+    const std::vector<mlx::core::array>& inputs,
+    std::vector<mlx::core::array>& outputs) {
+  using namespace mlx::core;
+  auto& a = inputs[0];
+  auto& b = inputs[1];
+  auto& out = outputs[0];
+
+  uint32_t M = static_cast<uint32_t>(a.shape(0));
+  uint32_t K = static_cast<uint32_t>(a.shape(1));
+  uint32_t N = static_cast<uint32_t>(b.shape(1));
+
+  // Allocate the output buffer in-place. axpby-pattern.
+  out.set_data(allocator::malloc(out.nbytes()));
+
+  // Load the precompiled metallib that sits next to _core.so.
+  auto& s = stream();
+  auto& d = metal::device(s.device);
+  auto lib = d.get_library("xgrn_ext", current_binary_dir());
+
+  // Pick the right kernel by input dtype. Output is always fp32.
+  const char* kname = (a.dtype() == bfloat16) ? "xgrn_sgm_bf16" : "xgrn_sgm_fp32";
+  auto kernel = d.get_kernel(kname, lib);
+
+  auto& enc = metal::get_command_encoder(s);
+  enc.set_compute_pipeline_state(kernel);
+
+  enc.set_input_array(a, 0);
+  enc.set_input_array(b, 1);
+  enc.set_output_array(out, 2);
+  enc.set_bytes(M, 3);
+  enc.set_bytes(K, 4);
+  enc.set_bytes(N, 5);
+
+  // 2x2 simdgroup layout: 4 simdgroups per threadgroup x 32 lanes = 128 threads.
+  // 32x64 output per threadgroup.
+  const uint64_t threads_per_group = 128;
+  const uint64_t num_groups =
+      static_cast<uint64_t>(M / 32) * static_cast<uint64_t>(N / 64);
+  MTL::Size group_dims = MTL::Size(threads_per_group, 1, 1);
+  MTL::Size grid_dims = MTL::Size(threads_per_group * num_groups, 1, 1);
+  enc.dispatch_threads(grid_dims, group_dims);
 }
 
 mlx::core::array simdgroup_matmul_primitive(
