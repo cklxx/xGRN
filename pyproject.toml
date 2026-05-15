@@ -30,10 +30,9 @@ dependencies = [
 xgrn-app = "app:main"
 xgrn-bench = "xgrn_mlx.bench:main"
 xgrn-convert = "xgrn_mlx.convert:main"
-xgrn-download = "xgrn_metal.download:main"
+xgrn-download = "xgrn_mlx.download:main"
 xgrn-hbq-parity = "xgrn_mlx.hbq_parity:main"
 xgrn-parity = "xgrn_mlx.parity:main"
-xgrn-pytorch-bench = "xgrn_metal.bench_pytorch:main"
 xgrn-run = "xgrn_mlx.run:main"
 xgrn-validate = "xgrn_mlx.validate:main"
 
@@ -43,4 +42,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["app"]
-packages = ["xgrn_metal", "xgrn_mlx", "flash_attn"]
+# `flash_attn` is a small compatibility shim required by the sibling `../GRN`
+# reference checkout (which xgrn_mlx loads via sys.path for the UMT5 text
+# encoder, the parity harness, and the optional MPS HBQ decoder). It is not
+# imported directly by xgrn_mlx code.
+packages = ["xgrn_mlx", "flash_attn"]

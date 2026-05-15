@@ -133,8 +133,8 @@ time in `end_to_end_sec`.
 
 | Profile | Runtime | Command | End-to-end | GRN refine | Decode | Max RSS | Notes |
 |---|---|---|---:|---:|---:|---:|---|
-| `debug` (0.06M, 2 steps) | PyTorch/MPS fp16 | `uv run xgrn-pytorch-bench --profile debug` | failed | failed | failed | n/a | MPS matmul dtype assertion |
-| `debug` (0.06M, 2 steps) | PyTorch/MPS fp32 | `uv run xgrn-pytorch-bench --profile debug --device mps --dtype fp32` | 109.19 s | n/a | n/a | 19.37 GB | `outputs/pytorch_bench/debug-mps-fp32-report.json` |
+| `debug` (0.06M, 2 steps) | PyTorch/MPS fp16 (historical baseline, code removed) | — | failed | failed | failed | n/a | MPS matmul dtype assertion |
+| `debug` (0.06M, 2 steps) | PyTorch/MPS fp32 (historical baseline, code removed) | — | 109.19 s | n/a | n/a | 19.37 GB | one-shot reference; `xgrn_metal/bench_pytorch.py` retired |
 | `debug` (0.06M, 2 steps) | **xGRN MLX bf16 + native HBQ cold** | `uv run xgrn-bench --profile debug` | **4.39 s** | 3.81 s | 0.56 s | 9.91 GB | `outputs/bench/debug-native-decoder-bf16-cold-report.json` |
 | `debug` (0.06M, 2 steps) | **xGRN MLX bf16 + compiled visual + native HBQ warm median** | `uv run xgrn-bench --profile debug --warmup --repeat 5` | **1.07 s** | 0.78 s | 0.28 s | 9.91 GB | `outputs/bench/debug-compile-visual-pass-warm-repeat5-report.json` |
 | `debug` (0.06M, 2 steps) | xGRN MLX bf16 + native HBQ warm, no visual compile | `uv run xgrn-bench --profile debug --no-compile-visual-pass --warmup --repeat 5` | 1.18 s | 0.86 s | 0.31 s | 8.36 GB | fallback comparison |
