@@ -56,9 +56,22 @@ Each fused kernel must (i) match the existing block dtype contract (fp32 inputs 
 
 Aggregate target: dispatches **200 → 60–80**, GRN per-step **1.55 s → 0.95–1.05 s**, `0.25M/50` GRN **77.70 s → ~50 s** end-to-end **~55–60 s**, a 1.3–1.4× speedup while keeping CLIP >= 0.93.
 
-**Status after 2026-05-15 work:** only **A1-lite** (fused `apply_rope`) delivers a real win at -1.63% wall on `t2i-correct`. **A2** (fused residual + post-attn rms_norm) measured -0.28% GRN with +7% RSS — within noise, kept opt-in only. **A1-full** POC (fused rms_norm + q_proj with naive scalar matmul) is 8× slower than MLX's tuned GEMM in microbench; a real A1-full needs `simdgroup_matrix_storage` 8×8×8 ops (multi-day kernel project, out of session scope). **A3** (fused sampling) deferred — per dispatch-count theory, expected -0.05% to -0.15%, deep in noise. The dispatch-count theory holds cleanly: the wall impact scales with the dispatch saving per step.
+**Status after 2026-05-15 work:** only **A1-lite** (fused `apply_rope`) delivers a real win at -1.63% wall on `t2i-correct`. **A2** (fused residual + post-attn rms_norm) measured -0.28% GRN with +7% RSS — within noise, kept opt-in only. **A1-full** POC (fused rms_norm + q_proj with naive scalar matmul) is 8× slower than MLX's tuned GEMM in microbench. **A3** (fused sampling) deferred — per dispatch-count theory, expected -0.05% to -0.15%, deep in noise.
 
-**Track A summary:** non-matmul fusion is saturated on this M4 Pro / MLX 0.31 stack. The remaining ceiling (~1.3-1.4× wall) requires a tuned bf16 simdgroup matmul that wins against Apple's GEMM. That is genuinely the next-frontier engineering project and not a session-scope refactor.
+**Simdgroup matmul project (Track A1-full real foundation)** is now officially open. Landed in `xgrn_mlx/simdgroup_matmul.py`:
+- fp32 2×2 `simdgroup_matrix<float,8,8>` GEMM: byte-exact parity, **2.13× of MLX matmul** (8× → 4.39× → 2.13× across three iterations)
+- bf16 2×2 `simdgroup_matrix<bfloat,8,8>` GEMM with fp32 accumulator: byte-exact parity, 2.22× of MLX bf16 matmul
+- Recorded negative iterations: 4×4 layout (2.22× — too many threads), threadgroup-cached A tile (3.32× — barrier cost dominated). bf16 confirmed working but does not change the gap, so the remaining 2× is **bandwidth/occupancy structural**, not compute throughput.
+
+Next-iteration paths to close the gap (multi-session work):
+1. `metal::simd_async_copy` device-to-threadgroup with double-buffered tile pipelining (overlap memory with compute).
+2. Output-stationary register tiling (each simdgroup holds 2-4 accumulators across one K traversal).
+3. Larger output tiles per simdgroup (multiple simdgroup_matrix per accumulator).
+4. (M_TILE, N_TILE, K_STEP) autotune sweep on M4 Pro.
+
+Once the kernel is at <= 1.0× of MLX, fuse rms_norm pre-pass and wire into `block()` behind `--fuse-qkv-metal` flag.
+
+**Track A summary:** the non-matmul fusion subspace is saturated on this stack. The remaining ceiling (~1.3-1.4× wall) lives behind the simdgroup matmul project, which is now scaffolded but not yet competitive.
 
 Family-9 implementation rules for every kernel:
 - Use `simdgroup_matrix_storage` 8×8×8 bf16 multiplies for any inner-loop matmul.
