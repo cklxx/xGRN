@@ -3,7 +3,9 @@ __pycache__/
 .venv/
 .DS_Store
 xgrn.egg-info/
-outputs/
+outputs/**
+!outputs/**/
+!outputs/**/*.py
 models/
 .python-version
 .gstack/

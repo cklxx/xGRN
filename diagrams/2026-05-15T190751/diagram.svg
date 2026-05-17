@@ -1,0 +1,724 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="4180" viewBox="0 0 1800 4180">
+
+  <!-- Page background -->
+  <rect x="0" y="0" width="1800" height="4180" fill="#FBF8F3"/>
+  <rect x="0" y="0" width="1800" height="6" fill="#1F4E8B"/>
+
+  <!-- ============================================================== -->
+  <!-- TITLE                                                          -->
+  <!-- ============================================================== -->
+  <text x="80" y="78" font-family="-apple-system,SF Pro Text,Helvetica" font-size="38" font-weight="700" fill="#0F1B2D">xGRN 生图流水线 · 系统全景 v3</text>
+  <text x="80" y="116" font-family="-apple-system,SF Pro Text,Helvetica" font-size="16" fill="#4A5A6E">warm t2i-correct · 0.25M · 50 steps · bf16 · M4 Pro · 20 GPU cores · 12 MB L2 · 273 GB/s LPDDR5X · 统一内存</text>
+  <polyline points="80,138 1720,138" stroke="#E0DDD4" stroke-width="2"/>
+  <circle cx="1720" cy="138" r="4" fill="#E07B3C"/>
+
+  <!-- ============================================================== -->
+  <!-- HERO METRICS — 5 cards                                         -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,170)">
+    <rect x="0"    y="0" width="318" height="120" rx="12" fill="#FFFFFF" stroke="#E2DCD0" stroke-width="1.5"/>
+    <rect x="0"    y="0" width="6"   height="120" rx="3"  fill="#1F4E8B"/>
+    <text x="24" y="38" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#67768A" letter-spacing="1">END-TO-END (warm)</text>
+    <text x="24" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="46" font-weight="700" fill="#0F1B2D">76.66<tspan font-size="22" fill="#67768A"> s</tspan></text>
+    <text x="24" y="106" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#67768A">单次生成 · 缓存已 prime</text>
+
+    <rect x="338" y="0" width="318" height="120" rx="12" fill="#FFFFFF" stroke="#E2DCD0" stroke-width="1.5"/>
+    <rect x="338" y="0" width="6"   height="120" rx="3"  fill="#2A66AD"/>
+    <text x="362" y="38" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#67768A" letter-spacing="1">STEP · GPU SHARE</text>
+    <text x="362" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="46" font-weight="700" fill="#0F1B2D">99.9<tspan font-size="22" fill="#67768A"> %</tspan></text>
+    <text x="362" y="106" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#67768A">CPU dispatch 仅 1.18 ms / step</text>
+
+    <rect x="676" y="0" width="318" height="120" rx="12" fill="#FFFFFF" stroke="#E2DCD0" stroke-width="1.5"/>
+    <rect x="676" y="0" width="6"   height="120" rx="3"  fill="#E07B3C"/>
+    <text x="700" y="38" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#67768A" letter-spacing="1">QKV PARALLELISM</text>
+    <text x="700" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="46" font-weight="700" fill="#0F1B2D">16<tspan font-size="22" fill="#67768A"> %</tspan></text>
+    <text x="700" y="106" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#67768A">3 matmul = 2.51× single · 84% 串行</text>
+
+    <rect x="1014" y="0" width="318" height="120" rx="12" fill="#FFFFFF" stroke="#E2DCD0" stroke-width="1.5"/>
+    <rect x="1014" y="0" width="6"  height="120" rx="3"  fill="#8E4EC6"/>
+    <text x="1038" y="38" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#67768A" letter-spacing="1">MLP COMPUTE UTILIZATION</text>
+    <text x="1038" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="46" font-weight="700" fill="#0F1B2D">94<tspan font-size="22" fill="#67768A"> %</tspan></text>
+    <text x="1038" y="106" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#67768A">Apple GEMM 实测 peak · compute-bound</text>
+
+    <rect x="1352" y="0" width="318" height="120" rx="12" fill="#FFFFFF" stroke="#E2DCD0" stroke-width="1.5"/>
+    <rect x="1352" y="0" width="6"  height="120" rx="3"  fill="#5CB85C"/>
+    <text x="1376" y="38" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#67768A" letter-spacing="1">COMPILE SAVES</text>
+    <text x="1376" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="46" font-weight="700" fill="#0F1B2D">13<tspan font-size="22" fill="#67768A"> %</tspan></text>
+    <text x="1376" y="106" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#67768A">1744 → 1510 ms · 主要靠 dispatch 合并</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ① — CONTAINMENT HIERARCHY                              -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,340)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">① 包含关系 · 嵌套的"东西套东西"视角</text>
+    <text x="370" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">每一层是上一层的子集 · 数字 = 占父层比例</text>
+
+    <rect x="0" y="30" width="1640" height="240" rx="14" fill="#FFFFFF" stroke="#1F4E8B" stroke-width="2"/>
+    <text x="20" y="58" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#1F4E8B">end_to_end  · 76.66 s · 100 %</text>
+
+    <rect x="20" y="75" width="40" height="44" rx="6" fill="#F5F1E8" stroke="#CFC8B9" stroke-width="1"/>
+    <text x="40" y="100" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" font-weight="600" text-anchor="middle" fill="#67768A">setup</text>
+    <text x="40" y="113" font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" text-anchor="middle" fill="#67768A">&lt;1ms</text>
+
+    <rect x="64" y="75" width="1396" height="180" rx="12" fill="#E6EDF6" stroke="#1F4E8B" stroke-width="2"/>
+    <text x="84" y="100" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#1F4E8B">grn_refine  · 75.56 s · 98.6 % of e2e  ·  50 × refinement_step</text>
+
+    <rect x="84" y="120" width="900" height="120" rx="10" fill="#F8FAFD" stroke="#2A66AD" stroke-width="1.7"/>
+    <text x="104" y="142" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#2A66AD">refinement_step (1 of 50)  ·  1.51 s</text>
+
+    <rect x="104" y="155" width="800" height="75" rx="8" fill="#2A66AD" stroke="#1F4E8B" stroke-width="1.5"/>
+    <text x="504" y="185" font-family="-apple-system,SF Pro Text,Helvetica" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">visual_forward  ·  1510 ms · 99.5 % of step</text>
+    <text x="504" y="208" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#C5D6EE" text-anchor="middle">→ 28 × block (每个 block ≈ 54 ms compiled / 62 ms uncompiled)</text>
+
+    <rect x="912" y="155" width="68" height="33" rx="5" fill="#5B9BD5"/>
+    <text x="946" y="174" font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" font-weight="600" fill="#FFFFFF" text-anchor="middle">logits</text>
+    <text x="946" y="184" font-family="-apple-system,SF Pro Text,Helvetica" font-size="8" fill="#FFFFFF" text-anchor="middle">2.1 ms</text>
+    <rect x="912" y="195" width="68" height="33" rx="5" fill="#F1C40F"/>
+    <text x="946" y="214" font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" font-weight="600" fill="#2A2A2A" text-anchor="middle">sample+mask</text>
+    <text x="946" y="224" font-family="-apple-system,SF Pro Text,Helvetica" font-size="8" fill="#2A2A2A" text-anchor="middle">2.4 ms</text>
+
+    <text x="1010" y="180" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#1F4E8B">×50</text>
+    <text x="1010" y="200" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">每步独立</text>
+    <text x="1010" y="214" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">target_pt 升序</text>
+
+    <rect x="1090" y="120" width="100" height="60" rx="8" fill="#FFFFFF" stroke="#8E4EC6" stroke-width="1.7"/>
+    <text x="1140" y="142" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" font-weight="700" fill="#8E4EC6" text-anchor="middle">hbq_decode</text>
+    <text x="1140" y="160" font-family="-apple-system,SF Pro Text,Helvetica" font-size="16" font-weight="700" fill="#0F1B2D" text-anchor="middle">1.06 s</text>
+    <text x="1140" y="173" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">1.4 % of e2e</text>
+
+    <rect x="1200" y="120" width="100" height="60" rx="8" fill="#FFFFFF" stroke="#5CB85C" stroke-width="1.7"/>
+    <text x="1250" y="142" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" font-weight="700" fill="#5CB85C" text-anchor="middle">write + clip</text>
+    <text x="1250" y="160" font-family="-apple-system,SF Pro Text,Helvetica" font-size="16" font-weight="700" fill="#0F1B2D" text-anchor="middle">~40 ms</text>
+    <text x="1250" y="173" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">0.05 %</text>
+
+    <rect x="1330" y="120" width="130" height="120" rx="8" fill="#FFF8E7" stroke="#D29C2A" stroke-width="1.5"/>
+    <text x="1395" y="142" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" font-weight="700" fill="#7A5500" text-anchor="middle">一个 block</text>
+    <text x="1395" y="170" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D" text-anchor="middle">~54 ms</text>
+    <text x="1395" y="190" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">1510 / 28</text>
+    <text x="1395" y="210" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">详见 ③ ④ ⑤</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ② — CPU / GPU TIMELINE                                 -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,650)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">② CPU / GPU 时序 · 2 个连续 step 的并行流水</text>
+    <text x="510" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">CPU 1.18 ms / step · GPU 1526.68 ms / step · 比例 1 : 1293 · CPU 几乎全程空等</text>
+
+    <rect x="0" y="36" width="80" height="80" rx="6" fill="#FFFFFF" stroke="#67768A" stroke-width="1.5"/>
+    <text x="40" y="68" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" text-anchor="middle" fill="#0F1B2D">CPU</text>
+    <text x="40" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">1 core ·</text>
+    <text x="40" y="98" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">Metal encode</text>
+    <text x="40" y="110" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">+ Python</text>
+
+    <rect x="0" y="126" width="80" height="80" rx="6" fill="#FFFFFF" stroke="#1F4E8B" stroke-width="1.5"/>
+    <text x="40" y="158" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" text-anchor="middle" fill="#1F4E8B">GPU</text>
+    <text x="40" y="176" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">20 cores</text>
+    <text x="40" y="188" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">Metal kernels</text>
+
+    <rect x="100" y="36" width="1540" height="80" rx="4" fill="#F2EEE5"/>
+    <rect x="100" y="126" width="1540" height="80" rx="4" fill="#F2EEE5"/>
+
+    <line x1="100"  y1="32" x2="100"  y2="210" stroke="#888" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="870"  y1="32" x2="870"  y2="210" stroke="#888" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="1640" y1="32" x2="1640" y2="210" stroke="#888" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+    <text x="100"  y="225" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A" text-anchor="start">t = 0 ms</text>
+    <text x="870"  y="225" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A" text-anchor="middle">1527 ms  ↳ step boundary (mx.eval sync)</text>
+    <text x="1640" y="225" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A" text-anchor="end">3055 ms</text>
+
+    <rect x="100" y="46" width="8" height="60" fill="#67768A"/>
+    <rect x="870" y="46" width="8" height="60" fill="#67768A"/>
+    <text x="118" y="60" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" font-weight="600" fill="#0F1B2D">CPU dispatch · 1.18 ms</text>
+    <text x="118" y="75" font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" fill="#67768A">Python loop · MLX op trace · Metal encoder</text>
+    <text x="118" y="90" font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" fill="#67768A">实际占 step 的 0.1 %</text>
+    <text x="888" y="60" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" font-weight="600" fill="#0F1B2D">CPU dispatch · 1.18 ms</text>
+
+    <line x1="108" y1="76" x2="870" y2="76" stroke="#CFC8B9" stroke-width="2"/>
+    <text x="489" y="100" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A89A82" text-anchor="middle">CPU 此处空转 · 等 GPU 完成 (mx.eval barrier)</text>
+    <line x1="878" y1="76" x2="1640" y2="76" stroke="#CFC8B9" stroke-width="2"/>
+
+    <rect x="100" y="136" width="762" height="60" fill="#1F4E8B"/>
+    <text x="481" y="170" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">visual_forward · 28 blocks · MLP+SDPA+QKV+RoPE+norms</text>
+    <text x="481" y="186" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#C5D6EE" text-anchor="middle">1510 ms · 计算密集 · Metal 命令队列 in-order</text>
+    <rect x="862" y="136" width="8"   height="60" fill="#F1C40F"/>
+    <rect x="870" y="136" width="762" height="60" fill="#1F4E8B"/>
+    <text x="1251" y="170" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">visual_forward (next step)</text>
+    <rect x="1632" y="136" width="8"   height="60" fill="#F1C40F"/>
+
+    <g transform="translate(0,260)">
+      <rect x="0" y="0" width="1640" height="80" rx="10" fill="#F5F1E8" stroke="#CFC8B9" stroke-width="1"/>
+      <text x="20" y="26" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#0F1B2D">统一内存 (Unified Memory) · 没有 CPU↔GPU 传输 · 但 GPU 内部 cache 层级真实存在 (详见 ⑤)</text>
+      <text x="20" y="48" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#4A5A6E">M4 Pro 48 GB LPDDR5X 物理上由 CPU+GPU 共享 · 没有 PCIe / DMA · 所谓"传输"只是命令队列入队 + 内存屏障,亚微秒级。</text>
+      <text x="20" y="65" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#4A5A6E">mx.eval 不是拷贝,是"等 GPU 把当前 command buffer 跑完"的同步点 · 物理 HBM 带宽 273 GB/s peak。</text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ③ — SINGLE BLOCK DAG (data dependencies + tensor sizes) -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,1100)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">③ 一个 block 的 DAG · 数据依赖 + 张量形状 + 内存大小</text>
+    <text x="540" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">B=2 (CFG) · L=257 · H=2304 · n_heads=18 · head_dim=128 · mlp_hidden=8192 · bf16 输入 · fp32 累加</text>
+
+    <!-- DAG canvas -->
+    <rect x="0" y="30" width="1640" height="1080" rx="10" fill="#FFFFFF" stroke="#E2DCD0" stroke-width="1"/>
+
+    <!-- Background bands marking "parallel-eligible" branches -->
+    <rect x="60"  y="180" width="1520" height="290" fill="#FFFAF1" opacity="0.55"/>
+    <text x="1556" y="200" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" font-weight="700" fill="#A65420" text-anchor="end">↑ 这一段 q/k/v 三条线理论上可并行</text>
+
+    <rect x="60"  y="650" width="1520" height="160" fill="#FFFAF1" opacity="0.55"/>
+    <text x="1556" y="670" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" font-weight="700" fill="#A65420" text-anchor="end">↑ gate / up 共享 h_post 输入,理论上可并行</text>
+
+    <!-- ============= Level 0: input x ============= -->
+    <rect x="700" y="60" width="240" height="50" rx="8" fill="#FFFFFF" stroke="#0F1B2D" stroke-width="2"/>
+    <text x="820" y="82" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" text-anchor="middle" fill="#0F1B2D">x (block input)</text>
+    <text x="820" y="100" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" text-anchor="middle" fill="#67768A">[2, 257, 2304] fp32 · 4.7 MB</text>
+
+    <polyline points="820,110 820,140" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- ============= Level 1: pre_attn_norm ============= -->
+    <rect x="700" y="140" width="240" height="40" rx="6" fill="#5CB85C"/>
+    <text x="820" y="165" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">pre_attn rms_norm · 0.28 ms</text>
+
+    <text x="970" y="158" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">读 x + norm_w (2304) · 写 h · sum 是 reduction 操作</text>
+    <text x="970" y="172" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">访存 = 2 × (B·L·H) = 9.5 MB · 用 fast.rms_norm 已融合</text>
+
+    <polyline points="820,180 820,210 350,210 350,240" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,180 820,240" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,210 1290,210 1290,240" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <text x="820" y="200" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A" text-anchor="middle">h: [2,257,2304] · 4.7 MB · 3 个消费者</text>
+
+    <!-- ============= Level 2: q_proj / k_proj / v_proj ============= -->
+    <rect x="230" y="240" width="240" height="50" rx="8" fill="#5B9BD5"/>
+    <text x="350" y="262" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">q_proj · 3.45 ms</text>
+    <text x="350" y="280" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 2304] @ [2304, 2304]</text>
+    <text x="350" y="310" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">读权重 10.6 MB · 写 q · WS 17.7 MB · 1.4× L2 (不全装下)</text>
+
+    <rect x="700" y="240" width="240" height="50" rx="8" fill="#5B9BD5"/>
+    <text x="820" y="262" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">k_proj · 3.52 ms</text>
+    <text x="820" y="280" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 2304] @ [2304, 2304]</text>
+    <text x="820" y="310" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">读权重 10.6 MB · 写 k · 同 shape ⇒ 时间相同</text>
+
+    <rect x="1170" y="240" width="240" height="50" rx="8" fill="#5B9BD5"/>
+    <text x="1290" y="262" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">v_proj · 3.52 ms</text>
+    <text x="1290" y="280" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 2304] @ [2304, 2304]</text>
+    <text x="1290" y="310" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#67768A">读权重 10.6 MB · 写 v · 同 shape ⇒ 时间相同</text>
+
+    <polyline points="350,290 350,330" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,290 820,330" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="1290,290 1290,470" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- Annotation in the parallel-eligible band -->
+    <text x="80" y="270" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" font-weight="700" fill="#A65420">理论:可并行</text>
+    <text x="80" y="284" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">3 个 matmul 共享 h</text>
+    <text x="80" y="298" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">无相互依赖</text>
+    <text x="80" y="328" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" font-weight="700" fill="#A65420">实测:84% 串行</text>
+    <text x="80" y="342" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">3-matmul 用时</text>
+    <text x="80" y="356" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">= 2.51× 单个</text>
+    <text x="80" y="370" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">Metal 命令队列</text>
+    <text x="80" y="384" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">in-order 调度,</text>
+    <text x="80" y="398" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">仅 16% 重叠</text>
+
+    <!-- Level 3: q_norm / k_norm -->
+    <rect x="230" y="330" width="240" height="36" rx="6" fill="#5CB85C"/>
+    <text x="350" y="354" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">q_norm · 0.43 ms</text>
+    <rect x="700" y="330" width="240" height="36" rx="6" fill="#5CB85C"/>
+    <text x="820" y="354" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">k_norm · 0.43 ms</text>
+
+    <polyline points="350,366 350,400" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,366 820,400" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- Level 4: rope_q / rope_k -->
+    <rect x="230" y="400" width="240" height="36" rx="6" fill="#E07B3C"/>
+    <text x="350" y="424" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">apply_rope_q · 1.37 ms</text>
+    <rect x="700" y="400" width="240" height="36" rx="6" fill="#E07B3C"/>
+    <text x="820" y="424" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">apply_rope_k · 1.38 ms</text>
+
+    <text x="1430" y="424" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" font-weight="700" fill="#A65420">★ A1-lite</text>
+    <text x="1430" y="438" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">融合到 1 个</text>
+    <text x="1430" y="452" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">Metal kernel</text>
+
+    <polyline points="350,436 350,470 760,470 760,500" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,436 820,470 820,500" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="1290,470 880,470 880,500" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- Level 5: SDPA -->
+    <rect x="620" y="500" width="400" height="60" rx="8" fill="#8E4EC6"/>
+    <text x="820" y="525" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" text-anchor="middle" fill="#FFFFFF">SDPA · 6.11 ms · mx.fast.scaled_dot_product_attention</text>
+    <text x="820" y="544" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">q×k.T softmax @ v  ·  Apple 已融合 + tile fit 在 L2 (per-head 0.5 MB)</text>
+
+    <text x="1056" y="528" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">含 text_prefix KV (来自 cache):</text>
+    <text x="1056" y="542" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">k = concat[text_K(71), k_rope(257)] = 328</text>
+    <text x="1056" y="556" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">v = concat[text_V(71), v(257)] = 328</text>
+
+    <polyline points="820,560 820,580" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- Level 6: o_proj -->
+    <rect x="700" y="580" width="240" height="50" rx="8" fill="#5B9BD5"/>
+    <text x="820" y="602" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">o_proj · 3.45 ms</text>
+    <text x="820" y="620" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 2304] @ [2304, 2304]</text>
+
+    <polyline points="820,630 820,650" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- Level 7: residual + post_norm -->
+    <rect x="700" y="650" width="240" height="34" rx="6" fill="#BDBDBD"/>
+    <text x="820" y="673" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">+ residual (x) · 0.41 ms</text>
+
+    <text x="970" y="670" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">x + o_proj_out · element-wise · 全 HBM 流 (no reuse)</text>
+
+    <polyline points="820,684 820,700" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <rect x="700" y="700" width="240" height="34" rx="6" fill="#5CB85C"/>
+    <text x="820" y="723" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">post_attn rms_norm · 0.27 ms</text>
+
+    <polyline points="820,734 820,750 470,750 470,780" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,734 820,780" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <text x="820" y="770" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A" text-anchor="middle">h_post: [2,257,2304] · 4.7 MB · 2 个消费者</text>
+
+    <!-- Level 8: gate_proj / up_proj -->
+    <rect x="350" y="780" width="240" height="46" rx="8" fill="#367CCA"/>
+    <text x="470" y="800" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">mlp_gate_proj · 11.51 ms</text>
+    <text x="470" y="817" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 2304] @ [2304, 8192]</text>
+
+    <rect x="700" y="780" width="240" height="46" rx="8" fill="#2A66AD"/>
+    <text x="820" y="800" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">mlp_up_proj · 11.55 ms</text>
+    <text x="820" y="817" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 2304] @ [2304, 8192]</text>
+
+    <text x="1056" y="800" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#A65420" font-weight="700">权重 37.7 MB / 个 · 4.5× L2 (装不下)</text>
+    <text x="1056" y="816" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">★ 但实测 94-95% peak FLOPs · Apple GEMM 内部 tile 处理 · compute-bound</text>
+
+    <polyline points="470,826 470,840 645,840 645,860" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <polyline points="820,826 820,840 645,840 645,860" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- Level 9: silu*up -->
+    <rect x="525" y="860" width="240" height="36" rx="6" fill="#3D8884"/>
+    <text x="645" y="884" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">silu(gate) · up · 0.22 ms (compiled)</text>
+
+    <text x="785" y="884" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">★ mx.compile 已融合 · 113 GB/s = 41% peak BW · 手写 kernel +56% 反退化</text>
+
+    <polyline points="645,896 645,920" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- ============= Level 10: mlp_down_proj ============= -->
+    <rect x="525" y="920" width="240" height="46" rx="8" fill="#1F4E8B"/>
+    <text x="645" y="940" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">mlp_down_proj · 11.66 ms</text>
+    <text x="645" y="957" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="middle" fill="#FFFFFF">[514, 8192] @ [8192, 2304]</text>
+
+    <text x="785" y="940" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#A65420" font-weight="700">权重 37.7 MB · 4.0× L2</text>
+    <text x="785" y="956" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">WS 51 MB · 完全 HBM stream · 28 个 block 共占 326 ms · 18.7 %</text>
+
+    <polyline points="645,966 645,996 700,996 700,1004" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- ============= Level 11: +residual (x after attn) ============= -->
+    <rect x="700" y="1004" width="240" height="34" rx="6" fill="#BDBDBD"/>
+    <text x="820" y="1027" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="middle" fill="#FFFFFF">+ residual (h_post) · 0.39 ms</text>
+
+    <text x="970" y="1024" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">h_post + mlp_down_out · element-wise · 4.7 MB R+R+W</text>
+
+    <polyline points="820,1038 820,1056" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+
+    <!-- ============= Level 12: block output ============= -->
+    <rect x="700" y="1056" width="240" height="40" rx="8" fill="#FFFFFF" stroke="#0F1B2D" stroke-width="2"/>
+    <text x="820" y="1080" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" text-anchor="middle" fill="#0F1B2D">block output  →  next block</text>
+
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ④ — REAL GPU TIMELINE (one block, ops side-by-side)    -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,2260)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">④ 一个 block 在 GPU 上的实际调度 · 串行视图</text>
+    <text x="470" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">19 个 op · uncompiled sum = 62.26 ms · compiled = 53.93 ms · 13.4% 来自 dispatch 合并 + Metal 队列 16% 重叠</text>
+
+    <!-- Single horizontal GPU lane · 62 ms wide @ ~25 px/ms = 1550 px -->
+    <rect x="0" y="36" width="1640" height="60" rx="4" fill="#F2EEE5"/>
+
+    <!-- Op blocks at 25 px/ms. Cumulative x position. -->
+    <!-- 1. pre_attn_norm 0.28 ms  → 7 px -->
+    <rect x="0"    y="36" width="7"   height="60" fill="#5CB85C"/>
+    <!-- 2. q_proj 3.45 → 86 -->
+    <rect x="7"    y="36" width="86"  height="60" fill="#5B9BD5"/>
+    <!-- 3. k_proj 3.52 → 88 -->
+    <rect x="93"   y="36" width="88"  height="60" fill="#5B9BD5"/>
+    <!-- 4. v_proj 3.52 → 88 -->
+    <rect x="181"  y="36" width="88"  height="60" fill="#5B9BD5"/>
+    <!-- 5. q_norm 0.43 → 11 -->
+    <rect x="269"  y="36" width="11"  height="60" fill="#5CB85C"/>
+    <!-- 6. k_norm 0.43 → 11 -->
+    <rect x="280"  y="36" width="11"  height="60" fill="#5CB85C"/>
+    <!-- 7. rope_q 1.37 → 34 -->
+    <rect x="291"  y="36" width="34"  height="60" fill="#E07B3C"/>
+    <!-- 8. rope_k 1.38 → 34 -->
+    <rect x="325"  y="36" width="34"  height="60" fill="#E07B3C"/>
+    <!-- 9. sdpa 6.11 → 153 -->
+    <rect x="359"  y="36" width="153" height="60" fill="#8E4EC6"/>
+    <!-- 10. o_proj 3.45 → 86 -->
+    <rect x="512"  y="36" width="86"  height="60" fill="#5B9BD5"/>
+    <!-- 11. attn_residual 0.41 → 10 -->
+    <rect x="598"  y="36" width="10"  height="60" fill="#BDBDBD"/>
+    <!-- 12. post_attn_norm 0.27 → 7 -->
+    <rect x="608"  y="36" width="7"   height="60" fill="#5CB85C"/>
+    <!-- 13. gate_proj 11.51 → 288 -->
+    <rect x="615"  y="36" width="288" height="60" fill="#367CCA"/>
+    <!-- 14. up_proj 11.55 → 289 -->
+    <rect x="903"  y="36" width="289" height="60" fill="#2A66AD"/>
+    <!-- 15. silu*up 2.41 → 60 -->
+    <rect x="1192" y="36" width="60"  height="60" fill="#3D8884"/>
+    <!-- 16. down_proj 11.66 → 292 -->
+    <rect x="1252" y="36" width="292" height="60" fill="#1F4E8B"/>
+    <!-- 17. mlp_residual 0.39 → 10 -->
+    <rect x="1544" y="36" width="10"  height="60" fill="#BDBDBD"/>
+
+    <!-- Op labels with leader lines (alternating above/below) -->
+    <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" fill="#444">
+      <polyline points="3.5,30 3.5,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="3.5" y="14" text-anchor="middle">pre_norm</text>
+      <text x="3.5" y="26" text-anchor="middle">0.28</text>
+
+      <polyline points="50,30 50,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="50" y="14" text-anchor="middle">q_proj</text>
+      <text x="50" y="26" text-anchor="middle">3.45 ms</text>
+
+      <polyline points="137,102 137,112" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="137" y="125" text-anchor="middle">k_proj 3.52</text>
+
+      <polyline points="225,30 225,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="225" y="14" text-anchor="middle">v_proj</text>
+      <text x="225" y="26" text-anchor="middle">3.52 ms</text>
+
+      <polyline points="274,102 274,138" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="274" y="150" text-anchor="middle">q_norm 0.43</text>
+
+      <polyline points="285,30 285,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="285" y="14" text-anchor="middle">k_norm</text>
+      <text x="285" y="26" text-anchor="middle">0.43</text>
+
+      <polyline points="308,102 308,138" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="308" y="150" text-anchor="middle">rope_q 1.37</text>
+
+      <polyline points="342,30 342,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="342" y="14" text-anchor="middle">rope_k</text>
+      <text x="342" y="26" text-anchor="middle">1.38</text>
+
+      <polyline points="435,30 435,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="435" y="14" text-anchor="middle" font-weight="700">SDPA</text>
+      <text x="435" y="26" text-anchor="middle">6.11 ms</text>
+
+      <polyline points="555,102 555,112" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="555" y="125" text-anchor="middle">o_proj 3.45</text>
+
+      <polyline points="603,30 603,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="603" y="14" text-anchor="middle">+res</text>
+      <text x="603" y="26" text-anchor="middle">0.41</text>
+
+      <polyline points="611.5,102 611.5,138" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="611.5" y="150" text-anchor="middle">post_norm 0.27</text>
+
+      <polyline points="759,30 759,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="759" y="14" text-anchor="middle" font-weight="700">mlp_gate_proj</text>
+      <text x="759" y="26" text-anchor="middle">11.51 ms</text>
+
+      <polyline points="1047,102 1047,112" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="1047" y="125" text-anchor="middle" font-weight="700">mlp_up_proj 11.55 ms</text>
+
+      <polyline points="1222,30 1222,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="1222" y="14" text-anchor="middle">silu·up</text>
+      <text x="1222" y="26" text-anchor="middle">2.41</text>
+
+      <polyline points="1398,102 1398,112" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="1398" y="125" text-anchor="middle" font-weight="700">mlp_down_proj 11.66 ms</text>
+
+      <polyline points="1549,30 1549,20" stroke="#888" stroke-width="0.5" fill="none"/>
+      <text x="1549" y="14" text-anchor="middle">+res</text>
+    </g>
+
+    <!-- Axis -->
+    <line x1="0" y1="108" x2="1640" y2="108" stroke="#CFC8B9" stroke-width="1"/>
+    <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A" text-anchor="middle">
+      <text x="0" y="190">0 ms</text>
+      <text x="410" y="190">16</text>
+      <text x="820" y="190">31</text>
+      <text x="1230" y="190">47</text>
+      <text x="1556" y="190">62.3 ms · uncompiled sum</text>
+    </g>
+
+    <!-- Compiled compare bar -->
+    <rect x="0" y="200" width="1421" height="14" fill="#1F4E8B" opacity="0.4"/>
+    <text x="710" y="211" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">compiled = 53.93 ms · 13.4% 省自 dispatch 合并 + 命令队列重叠</text>
+
+    <!-- Key insight callout -->
+    <rect x="0" y="240" width="1640" height="60" rx="10" fill="#FFF8E7" stroke="#D29C2A" stroke-width="1.5"/>
+    <text x="20" y="262" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#7A5500">q/k/v/o 时间相等 ≠ 它们并行 — 三件事</text>
+    <text x="20" y="280" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#5B4400">① shape 完全相同 (都是 [514, 2304]@[2304, 2304]) ⇒ FLOPs 相同 ⇒ 时间相同。② Metal 命令队列 in-order ⇒ 即使理论可并行,实测 84% 串行。</text>
+    <text x="20" y="294" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#5B4400">③ mx.compile 救回 16% (q/k/v + gate/up 各有一段 Metal 队列重叠),其余靠减少 CPU dispatch · 这就是上面 13.4% compile 节省的来源。</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ⑤ — MEMORY HIERARCHY + ACCESS PATTERNS                  -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,2610)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">⑤ GPU 缓存层级 + 访存模式 · 哪些 op 装得下哪一层</text>
+    <text x="510" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">M4 Pro 20 cores · 12 MB L2 共享 · 32 KB threadgroup mem / threadgroup · 273 GB/s HBM</text>
+
+    <!-- Left: cache hierarchy pyramid (boxes stacked) -->
+    <g transform="translate(0,30)">
+      <!-- HBM -->
+      <rect x="0" y="280" width="700" height="60" rx="6" fill="#FFFFFF" stroke="#67768A" stroke-width="1.5"/>
+      <text x="20" y="305" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#0F1B2D">HBM / 统一内存</text>
+      <text x="20" y="324" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">48 GB · LPDDR5X · 273 GB/s · ~hundreds cycles 延迟 · 与 CPU 共享</text>
+      <text x="688" y="316" font-family="-apple-system,SF Pro Text,Helvetica" font-size="20" font-weight="700" fill="#67768A" text-anchor="end">48 GB</text>
+
+      <!-- L2 -->
+      <rect x="80" y="210" width="540" height="60" rx="6" fill="#FFFFFF" stroke="#2A66AD" stroke-width="1.5"/>
+      <text x="100" y="235" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#0F1B2D">L2 (system level cache, 20 cores 共享)</text>
+      <text x="100" y="254" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">~12 MB · ~50–100 cycles · GPU 自动管理 · weight reuse 在这里发生</text>
+      <text x="608" y="246" font-family="-apple-system,SF Pro Text,Helvetica" font-size="20" font-weight="700" fill="#2A66AD" text-anchor="end">12 MB</text>
+
+      <!-- L1 -->
+      <rect x="160" y="140" width="380" height="60" rx="6" fill="#FFFFFF" stroke="#367CCA" stroke-width="1.5"/>
+      <text x="180" y="165" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#0F1B2D">L1 / texture cache (per core)</text>
+      <text x="180" y="184" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">~32–64 KB · ~few cycles · 自动管理</text>
+      <text x="528" y="176" font-family="-apple-system,SF Pro Text,Helvetica" font-size="20" font-weight="700" fill="#367CCA" text-anchor="end">~64 KB</text>
+
+      <!-- Threadgroup -->
+      <rect x="220" y="70" width="260" height="60" rx="6" fill="#FFFFFF" stroke="#5B9BD5" stroke-width="1.5"/>
+      <text x="240" y="95" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" fill="#0F1B2D">threadgroup memory</text>
+      <text x="240" y="114" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#67768A">32 KB / threadgroup · 手动管理 · simdgroup_load 用这里</text>
+      <text x="468" y="106" font-family="-apple-system,SF Pro Text,Helvetica" font-size="20" font-weight="700" fill="#5B9BD5" text-anchor="end">32 KB</text>
+
+      <!-- Registers -->
+      <rect x="280" y="0" width="140" height="60" rx="6" fill="#FFFFFF" stroke="#0F1B2D" stroke-width="1.5"/>
+      <text x="350" y="22" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" font-weight="700" text-anchor="middle" fill="#0F1B2D">registers</text>
+      <text x="350" y="40" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">~256 fp32 / thread</text>
+      <text x="350" y="54" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">0 latency · simdgroup_matrix</text>
+
+      <!-- Connecting lines -->
+      <polyline points="350,60 350,70" stroke="#888" stroke-width="0.5"/>
+      <polyline points="350,130 350,140" stroke="#888" stroke-width="0.5"/>
+      <polyline points="350,200 350,210" stroke="#888" stroke-width="0.5"/>
+      <polyline points="350,270 350,280" stroke="#888" stroke-width="0.5"/>
+    </g>
+
+    <!-- Right: working set per op category vs L2 capacity (700 px wide box) -->
+    <g transform="translate(740,30)">
+      <text x="0" y="14" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#0F1B2D">Working-set ÷ L2 (12 MB) · 装不下就要 HBM 流</text>
+
+      <!-- horizontal scale: 0..60 MB → 0..900 px (15 px/MB) -->
+      <line x1="0" y1="46" x2="900" y2="46" stroke="#CFC8B9" stroke-width="1"/>
+      <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#67768A" text-anchor="middle">
+        <text x="0" y="62">0 MB</text>
+        <text x="180" y="62">12 MB · L2 容量</text>
+        <text x="450" y="62">30</text>
+        <text x="900" y="62">60 MB</text>
+      </g>
+      <!-- L2 limit marker -->
+      <line x1="180" y1="40" x2="180" y2="450" stroke="#D29C2A" stroke-width="1.5" stroke-dasharray="3,3"/>
+      <text x="184" y="50" font-family="-apple-system,SF Pro Text,Helvetica" font-size="9" fill="#A65420">L2</text>
+
+      <!-- Row 1: MLP gate/up · 57 MB -->
+      <rect x="0" y="80" width="855" height="34" fill="#367CCA"/>
+      <text x="-8" y="102" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">mlp_gate / mlp_up</text>
+      <text x="-8" y="118" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[514, 2304]→[514, 8192]</text>
+      <text x="865" y="102" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">57 MB</text>
+      <text x="865" y="118" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">4.5× L2 · HBM stream</text>
+
+      <!-- Row 2: MLP down · 51 MB -->
+      <rect x="0" y="134" width="765" height="34" fill="#1F4E8B"/>
+      <text x="-8" y="156" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">mlp_down</text>
+      <text x="-8" y="172" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[514, 8192]→[514, 2304]</text>
+      <text x="775" y="156" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">51 MB</text>
+      <text x="775" y="172" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#A65420">4.0× L2 · HBM stream</text>
+
+      <!-- Row 3: q/k/v/o · 17.7 MB -->
+      <rect x="0" y="188" width="266" height="34" fill="#5B9BD5"/>
+      <text x="-8" y="210" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">q / k / v / o_proj</text>
+      <text x="-8" y="226" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[514, 2304]→[514, 2304]</text>
+      <text x="276" y="210" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">17.7 MB</text>
+      <text x="276" y="226" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#7A5500">1.4× L2 · partial reuse</text>
+
+      <!-- Row 4: silu*up · 16.8 MB IO -->
+      <rect x="0" y="242" width="252" height="34" fill="#3D8884"/>
+      <text x="-8" y="264" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">silu·up · elementwise</text>
+      <text x="-8" y="280" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[514, 8192] R + R + W</text>
+      <text x="262" y="264" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">16.8 MB IO</text>
+      <text x="262" y="280" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#7A5500">~1.4× L2 · bandwidth dominated</text>
+
+      <!-- Row 5: rms_norm · 9.5 MB -->
+      <rect x="0" y="296" width="143" height="34" fill="#5CB85C"/>
+      <text x="-8" y="318" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">rms_norm</text>
+      <text x="-8" y="334" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[514, 2304] R + W</text>
+      <text x="153" y="318" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">9.5 MB</text>
+      <text x="153" y="334" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#5CB85C">fits L2 ✓</text>
+
+      <!-- Row 6: SDPA per-head · 0.5 MB -->
+      <rect x="0" y="350" width="7" height="34" fill="#8E4EC6"/>
+      <text x="-8" y="372" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">SDPA per-head tile</text>
+      <text x="-8" y="388" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[257, 128]×[128, 328]</text>
+      <text x="17" y="372" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">0.5 MB</text>
+      <text x="17" y="388" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#5CB85C">fits L1 / threadgroup ✓ · 这就是 fast.sdpa 快的原因</text>
+
+      <!-- Row 7: apply_rope · element-wise -->
+      <rect x="0" y="404" width="60" height="34" fill="#E07B3C"/>
+      <text x="-8" y="426" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" text-anchor="end" fill="#0F1B2D">apply_rope</text>
+      <text x="-8" y="442" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" text-anchor="end" fill="#67768A">[2, 18, 257, 128] R/W</text>
+      <text x="70" y="426" font-family="-apple-system,SF Pro Text,Helvetica" font-size="11" fill="#0F1B2D">~4 MB</text>
+      <text x="70" y="442" font-family="-apple-system,SF Pro Text,Helvetica" font-size="10" fill="#5CB85C">fits L2 ✓ · A1-lite 融合后单 kernel pass</text>
+    </g>
+
+    <!-- Insight callout — corrected 2026-05-15 -->
+    <g transform="translate(0,510)">
+      <rect x="0" y="0" width="1640" height="160" rx="10" fill="#F5F1E8" stroke="#CFC8B9" stroke-width="1"/>
+      <text x="20" y="26" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#0F1B2D">L2 装不下 ≠ HBM-bound · MLP 实测 compute-bound 94% peak</text>
+      <text x="20" y="48" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#4A5A6E">本来以为 MLP weight (37.7 MB) 装不进 L2 (12 MB) 就一定是 HBM streaming · 实测后被推翻:</text>
+      <text x="20" y="68" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" fill="#0F1B2D">gate_proj 5.65 TFLOP/s = **94% peak** · up_proj **95% peak** · down_proj **87% peak** · q_proj **88% peak**</text>
+      <text x="20" y="86" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#4A5A6E">Apple GEMM 自己 tile 切 weight,registers / threadgroup mem / L1 / L2 全用上了 — 我们从 mlx 外面看不到内部。只看到一个 GEMM kernel 跑得很满。</text>
+      <text x="20" y="104" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#4A5A6E">**实测验证**:int8 / int4 各 group_size 的 quantized_matmul 都打不过 bf16(quant kernel 没用上 tensorop)· 多 stream 0% 收益 · 大融合 matmul 0% 收益。</text>
+      <text x="20" y="124" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#4A5A6E">**element-wise**:silu·up 用 mx.compile 已经融合到 113 GB/s = 41% peak BW,手写 Metal kernel 反退化 56%。norm / rope (装得下 L2) 也接近峰值。</text>
+      <text x="20" y="146" font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" fill="#7A5500">**结论**:framework 层内,GPU cache 已经被 Apple GEMM + mx.compile 用满了 — 看 ⑧ 死路对账。</text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ⑥ — PER-OP SUM (renamed for clarity)                    -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,3280)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">⑥ 28 个 block 合并 op 总耗时排序 · 时间花在哪</text>
+    <text x="540" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">这是 SUM-across-blocks · 不是时序 · 排序后看 hot spot</text>
+
+    <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="13">
+      <rect x="240" y="36"  width="1080" height="24" fill="#1F4E8B"/>
+      <text x="232" y="53"  text-anchor="end" font-weight="600" fill="#0F1B2D">mlp_down_proj</text>
+      <text x="1330" y="53" fill="#0F1B2D">326 ms · 18.7 %</text>
+
+      <rect x="240" y="68"  width="1070" height="24" fill="#2A66AD"/>
+      <text x="232" y="85"  text-anchor="end" font-weight="600" fill="#0F1B2D">mlp_up_proj</text>
+      <text x="1320" y="85" fill="#0F1B2D">323 ms · 18.5 %</text>
+
+      <rect x="240" y="100" width="1067" height="24" fill="#367CCA"/>
+      <text x="232" y="117" text-anchor="end" font-weight="600" fill="#0F1B2D">mlp_gate_proj</text>
+      <text x="1317" y="117" fill="#0F1B2D">322 ms · 18.5 %</text>
+
+      <rect x="240" y="132" width="566" height="24" fill="#8E4EC6"/>
+      <text x="232" y="149" text-anchor="end" font-weight="600" fill="#0F1B2D">sdpa</text>
+      <text x="816" y="149" fill="#0F1B2D">171 ms · 9.8 %</text>
+
+      <rect x="240" y="164" width="326" height="24" fill="#5B9BD5"/>
+      <text x="232" y="181" text-anchor="end" font-weight="600" fill="#0F1B2D">k_proj</text>
+      <text x="576" y="181" fill="#0F1B2D">98.5 ms</text>
+
+      <rect x="240" y="196" width="325" height="24" fill="#5B9BD5"/>
+      <text x="232" y="213" text-anchor="end" font-weight="600" fill="#0F1B2D">v_proj</text>
+      <text x="575" y="213" fill="#0F1B2D">98.4 ms</text>
+
+      <rect x="240" y="228" width="319" height="24" fill="#5B9BD5"/>
+      <text x="232" y="245" text-anchor="end" font-weight="600" fill="#0F1B2D">q_proj</text>
+      <text x="569" y="245" fill="#0F1B2D">96.6 ms</text>
+
+      <rect x="240" y="260" width="319" height="24" fill="#5B9BD5"/>
+      <text x="232" y="277" text-anchor="end" font-weight="600" fill="#0F1B2D">o_proj</text>
+      <text x="569" y="277" fill="#0F1B2D">96.5 ms</text>
+
+      <rect x="240" y="292" width="223" height="24" fill="#3D8884"/>
+      <text x="232" y="309" text-anchor="end" font-weight="600" fill="#0F1B2D">mlp_silu·up</text>
+      <text x="473" y="309" fill="#0F1B2D">68 ms</text>
+
+      <rect x="240" y="324" width="128" height="24" fill="#E07B3C"/>
+      <text x="232" y="341" text-anchor="end" font-weight="600" fill="#0F1B2D">apply_rope (q+k)</text>
+      <text x="378" y="341" fill="#A65420">77 ms · ★ A1-lite shipped</text>
+
+      <rect x="240" y="356" width="133" height="24" fill="#5CB85C"/>
+      <text x="232" y="373" text-anchor="end" font-weight="600" fill="#0F1B2D">norms (×4 / block)</text>
+      <text x="383" y="373" fill="#0F1B2D">40 ms</text>
+
+      <rect x="240" y="388" width="87" height="24" fill="#BDBDBD"/>
+      <text x="232" y="405" text-anchor="end" font-weight="600" fill="#0F1B2D">residual + reshape</text>
+      <text x="337" y="405" fill="#0F1B2D">26 ms</text>
+    </g>
+
+    <polyline points="1338,36 1356,36 1356,124 1338,124" stroke="#1F4E8B" stroke-width="2" fill="none"/>
+    <text x="1366" y="78" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#1F4E8B">MLP</text>
+    <text x="1366" y="100" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#1F4E8B">56 %</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- SECTION ⑦ — TRACK A LEDGER                                      -->
+  <!-- ============================================================== -->
+  <g transform="translate(80,3740)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="22" font-weight="700" fill="#0F1B2D">⑧ 死路对账 · 已穷举的访存类抓手</text>
+    <text x="420" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" fill="#67768A">所有 framework 层尝试 · 2026-05-15</text>
+
+    <rect x="0" y="20" width="1640" height="30" fill="#F5F1E8"/>
+    <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" font-weight="700" fill="#0F1B2D">
+      <text x="14" y="40">实验</text>
+      <text x="430" y="40">假设</text>
+      <text x="940" y="40">实测结果</text>
+      <text x="1280" y="40">结论</text>
+    </g>
+
+    <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#0F1B2D">
+      <rect x="0" y="52" width="1640" height="28" fill="#FFFFFF" stroke="#5CB85C" stroke-width="1"/>
+      <text x="14" y="71" font-weight="700">mx.compile (整 visual_pass)</text>
+      <text x="430" y="71" fill="#4A5A6E">dispatch 合并 · element-wise 自动融合 · 队列重叠</text>
+      <text x="940" y="71" font-weight="700" fill="#207534">-13.4%  1744 → 1510 ms</text>
+      <text x="1280" y="71" font-weight="700" fill="#207534">★ shipped 默认开</text>
+
+      <rect x="0" y="82" width="1640" height="28" fill="#FFFFFF" stroke="#5CB85C" stroke-width="1"/>
+      <text x="14" y="101" font-weight="700">A1-lite (fused apply_rope)</text>
+      <text x="430" y="101" fill="#4A5A6E">把 q/k 的 q_norm + cos/sin/concat 合并到一个 Metal kernel</text>
+      <text x="940" y="101" font-weight="700" fill="#207534">-1.63% / step (rope 段)</text>
+      <text x="1280" y="101" font-weight="700" fill="#207534">★ shipped opt-in</text>
+
+      <rect x="0" y="112" width="1640" height="28" fill="#FFFFFF" stroke="#A8C99F" stroke-width="1"/>
+      <text x="14" y="131" font-weight="700">A2 (fused residual + post_attn_norm)</text>
+      <text x="430" y="131" fill="#4A5A6E">把 add + rms_norm 合并</text>
+      <text x="940" y="131" fill="#67768A">-0.28% · RSS +7%</text>
+      <text x="1280" y="131" fill="#67768A">opt-in only</text>
+    </g>
+
+    <g font-family="-apple-system,SF Pro Text,Helvetica" font-size="12" fill="#0F1B2D">
+      <rect x="0" y="142" width="1640" height="28" fill="#FFFFFF" stroke="#D9534F" stroke-width="1"/>
+      <text x="14" y="161" font-weight="700">多 stream q/k/v 并发</text>
+      <text x="430" y="161" fill="#4A5A6E">每个 matmul 独立 MTLCommandQueue,GPU 并发执行</text>
+      <text x="940" y="161" fill="#A65420">0.0% · 同默认 stream (2.60× vs 2.59×)</text>
+      <text x="1280" y="161" fill="#A65420">单 matmul 已占满</text>
+
+      <rect x="0" y="172" width="1640" height="28" fill="#FFFFFF" stroke="#D9534F" stroke-width="1"/>
+      <text x="14" y="191" font-weight="700">大融合 qkv matmul ([M,K]@[K,3N])</text>
+      <text x="430" y="191" fill="#4A5A6E">一个 GEMM 替三个 · 省 dispatch + 提利用率</text>
+      <text x="940" y="191" fill="#A65420">0.0% · split-eager 与 fused 完全相等</text>
+      <text x="1280" y="191" fill="#A65420">Apple GEMM 已最优</text>
+
+      <rect x="0" y="202" width="1640" height="28" fill="#FFFFFF" stroke="#D9534F" stroke-width="1"/>
+      <text x="14" y="221" font-weight="700">int8 / int4 quant MLP 权重 (gs 32/64/128)</text>
+      <text x="430" y="221" fill="#4A5A6E">砍 50-73% HBM 读权重 · 装进 L2</text>
+      <text x="940" y="221" fill="#A65420">最多 -3.8% (gate) · up_proj 反 +29%</text>
+      <text x="1280" y="221" fill="#A65420">quant kernel 无 tensorop</text>
+
+      <rect x="0" y="232" width="1640" height="28" fill="#FFFFFF" stroke="#D9534F" stroke-width="1"/>
+      <text x="14" y="251" font-weight="700">xgrn_swiglu_fused Metal kernel</text>
+      <text x="430" y="251" fill="#4A5A6E">手写 silu(gate)*up 单 kernel · 省中间 HBM 往返</text>
+      <text x="940" y="251" fill="#A65420">+56% · compile 223us 最快,手写 349us</text>
+      <text x="1280" y="251" fill="#A65420">mx.compile 已自动融合</text>
+
+      <rect x="0" y="262" width="1640" height="28" fill="#FFFFFF" stroke="#D9534F" stroke-width="1"/>
+      <text x="14" y="281" font-weight="700">fuse_qkv_ext / concat / metal / prim (7 变种)</text>
+      <text x="430" y="281" fill="#4A5A6E">把 qkv 写成 C++ 扩展 / 自定义 primitive / Python kernel</text>
+      <text x="940" y="281" fill="#A65420">+3.77% ~ +7.30% 全部回归</text>
+      <text x="1280" y="281" fill="#A65420">破坏 buffer pool / encoder pipeline</text>
+    </g>
+
+    <g transform="translate(0,310)">
+      <rect x="0" y="0" width="1640" height="90" rx="10" fill="#FFF8E7" stroke="#D29C2A" stroke-width="1.5"/>
+      <text x="20" y="26" font-family="-apple-system,SF Pro Text,Helvetica" font-size="14" font-weight="700" fill="#7A5500">下一步只剩两条:</text>
+      <text x="20" y="50" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#5B4400">① Track D · step distillation (DiMO / CDLM · 训练侧 · 50 → 8-12 步 · 理论 4-6× wall · 唯一数量级杠杆)</text>
+      <text x="20" y="70" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#5B4400">② 架构侧:MLP 低秩分解 / Top-K 激活稀疏 · 减 FLOPs(不是减访存)· 需要 CLIP 验证</text>
+    </g>
+  </g>
+
+  <g transform="translate(80,4140)">
+    <text x="0" y="0" font-family="-apple-system,SF Pro Text,Helvetica" font-size="13" fill="#8B8170">数据:outputs/track-a/profile/{phases,block_ops,cpu_gpu_split,serial_vs_parallel,multistream_qkv,fused_vs_split_qkv,mlp_quant_matmul,swiglu_fusion}.py · commits 4f210a8 → 08d5771 · M4 Pro 20 cores · bf16 · 0.25M · 50 steps</text>
+  </g>
+
+</svg>
