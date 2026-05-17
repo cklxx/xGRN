@@ -195,3 +195,70 @@ Each tmux session is started by this repo's owner and rotated independently. Tra
 - Self-Guidance for MaskGIT (late-stage CFG): https://arxiv.org/html/2410.13136v1
 - DiMO step distillation (ICCV 2025): https://openaccess.thecvf.com/content/ICCV2025/papers/Zhu_DiMO_Distilling_Masked_Diffusion_Models_into_One-step_Generator_ICCV_2025_paper.pdf
 - CDLM consistency distillation for discrete masked LMs: https://arxiv.org/pdf/2511.19269
+
+## 8. 2026-05-17 Deep Research Sweep — All 7 Spikes Negative
+
+Four parallel research agents (framework gaps / external projects / Track D distillation / architectural prototypes) produced a Top-7 prioritized spike list. **All seven tested negative** on `t2i-correct` warm. Only `P0-3` (cache fp32-cast norm weights) was shipped at ~0.1% step savings. The negative results pin down GRN's saturation profile precisely and rule out a class of "obvious" follow-ups.
+
+### Calibrations from the research
+
+- M4 Pro peak measured **7.59 TFLOP/s bf16** (we'd been using 6.0 in earlier analysis). MLP matmul utilization is therefore **74–95% of peak**, not 87–95%. Real but smaller compute headroom than v3 diagram implied.
+- xGRN is double-outlier vs industry: BF16 instead of FP16 (Draw Things/mflux/DiffusionKit/Apple all FP16), 50 steps instead of 8–24 (MaskGIT 8, Muse 24, Sana 14–20).
+- Apple GPU shader cores **do not** have `simdgroup_matrix<int8>` — `simdgroup_matrix` only supports fp16/bf16/fp32. int8 tensor ops are ANE-only. This is the hardware-level explanation for the 2026-05-15 quant-matmul regression.
+- Most diffusion distillation literature (Progressive Distillation, Consistency Models, LCM, DMD, ADD/Turbo) requires a PF-ODE or score function on continuous latents. GRN's categorical discrete refinement on continuous `pt` AdaLN cannot use any of them. **Discrete-diffusion family (DiMO, Di4C, SDTT, CDLM/MPDC) is the only viable distillation toolset.**
+
+### Spike results (all measured on `t2i-correct` warm, R=2 unless noted)
+
+| # | Spike | Wall delta | CLIP delta | Status | Root cause |
+|---|---|---:|---:|---|---|
+| P0-2 | `mx.compile(shapeless=True)` on visual_pass | n/a | n/a | RED | `Slice cannot infer output shapes` — KV-cache concat in graph needs static shape |
+| P0-3 | Cache fp32-cast norm weights | ≈0 | none | **GREEN, shipped** | Eliminates 7000 redundant astype dispatches; gain is noise but cost is zero |
+| P1-3 | Swap A1-lite fused_rope → `mx.fast.rope` | n/a | n/a | RED | GRN uses 3D RoPE (frame × height × width); `mx.fast.rope` is 1D-sequence-offset only |
+| P1-4 | `MLX_SDPA_BLOCKS=32` (M4-Pro tuning) | -0.3% | none | YELLOW | Isolated SDPA -30% but in `mx.compile` pipeline it's already overlapped |
+| P0-1 | `compute_dtype=fp16` end-to-end | **+1.6%** | none | RED | Isolated small-shape matmul -7.5% but pipeline cast overhead dominates |
+| P1-1 | SVD low-rank `down_proj` R=1536 | -1.7% | **0.99 → 0.01** | RED | GRN MLP weights are high-rank (S[0]=78, S[-5]≈2.5); 67% rank drop = 27% Frobenius loss. Even R=2304 (full rank) drops CLIP to 0.69 because bf16 dual-matmul accumulates precision error |
+| P1-2 | Drop block 14 (visual_forward) | -3.5% | **0.99 → 0.002** | RED | GRN has no layer-level redundancy; every block is doing essential work |
+
+### What this tells us about GRN as a model
+
+1. **Weights are full-rank**: SVD spectrum S[0]=77.6, S[-5]≈2.5 — flat decay across all 2304 ranks. LLM compression literature (ASVD, SVD-LLM) doesn't transfer because GRN was trained from scratch as a 2B refinement model with no over-parameterization slack.
+2. **Layers are non-redundant**: dropping any single mid-network block kills CLIP. Refinement step composition means each block's contribution is load-bearing.
+3. **bf16 is mandatory at the storage level**: not just for range, but because dual-matmul (e.g. SVD A,B) breaks under bf16 precision compounding.
+4. **mx.compile already at ceiling**: cross-step pipelining (`async_eval`), shapeless, weight pre-transpose, FP16 — all return ≈0 or regressive.
+
+### Updated next-step priority order
+
+The framework + architecture layer is **definitively saturated**. Two paths remain, both training-side or research-grade:
+
+1. **Track D distillation** — **DiMO** (ICCV 2025, Meissonic teacher) is the canonical fit. GRN forward already accepts continuous `pt` AdaLN so the integration path is direct. Cloud-only: 8×A100 · 3-5 days · ~$1.5K–$2.5K for 50→8 steps; +$1.5K for Di4C-augmented 8→4. Expected wall: **76 → 13–25 s e2e**. M4 Pro can host LoRA fine-tuning only, not from-scratch distillation.
+2. **DiTFastAttn cross-timestep attention sharing** (arXiv 2406.08552) — training-free, claims -76% attention FLOPs, 1.8× e2e on DiT models. 50 step × 28 block has plausibly high adjacent-step attention similarity. **Untested on discrete-refinement architectures**; needs a 1–2 week prototype. Lower predicted impact than DiMO but no cloud cost.
+3. **Token-Critic sampler** (Lezama 2022) — train an external critic, $100 one A100·80h, can drop GRN's 50 → ~16 steps. Sampler-only, no main-model retrain.
+
+### Experimental flags retained (default off, will not be promoted)
+
+These spikes added CLI flags that produce known regressions. They are kept behind `--fuse-...` flags with `default=0/empty` to prevent re-discovery cost:
+
+| Flag | Spike | Why kept | Promotion gate |
+|---|---|---|---|
+| `--fuse-mlp-lowrank-R N` | P1-1 SVD | Future ASVD-style activation-whitened SVD might unstick this | CLIP positive ≥ 0.93 |
+| `--drop-blocks N1,N2,...` | P1-2 layer-drop | Conditional drop (only late steps where signal converged) might be viable | CLIP positive ≥ 0.93 |
+| `--fuse-swiglu-metal` | 2026-05-15 | Loses to mx.compile (-56%) but useful reference for kernel authoring | — |
+| `--fuse-qkv-*` (7 variants) | 2026-05-15 | All regressed +3.77–7.30%; left as history | — |
+
+### Saturation stop rule (updated 2026-05-17)
+
+Going forward, do not propose framework-layer or single-layer architectural changes unless they include:
+- a published paper specifically on **discrete-token / categorical / masked refinement** models (not LLM, not DDPM), **and**
+- a measurement plan that pre-quantifies CLIP-gate risk before the wall-time experiment.
+
+Generic LLM compression / DDPM distillation literature has been definitively ruled out by the 2026-05-17 sweep.
+
+## 9. References (research sweep)
+
+- DiMO (ICCV 2025): https://arxiv.org/abs/2503.15457 · code https://github.com/yuanzhi-zhu/DiMO
+- Di4C (ICML 2025, Sony): https://arxiv.org/abs/2410.08709 · code https://github.com/sony/di4c
+- DiTFastAttn: https://arxiv.org/html/2406.08552v1
+- ASVD: https://arxiv.org/abs/2312.05821 · SVD-LLM: https://arxiv.org/abs/2403.07378
+- Token-Critic (MaskGIT improvement): https://ar5iv.labs.arxiv.org/html/2209.04439
+- CDLM/MPDC: https://arxiv.org/abs/2605.00161
+- Apple MSL Spec (simdgroup_matrix limits): https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf

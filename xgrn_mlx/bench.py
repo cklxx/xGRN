@@ -133,6 +133,8 @@ def run_profile(
     fuse_qkv_ext: bool = False,
     fuse_qkv_prim: bool = False,
     stack_cfg_cache: bool = False,
+    fuse_mlp_lowrank_R: int = 0,
+    drop_blocks: tuple[int, ...] = (),
     detailed_stats: bool = False,
     exact_step_sync: bool = False,
     sampling_mode: str = "categorical",
@@ -176,6 +178,8 @@ def run_profile(
         fuse_qkv_ext=fuse_qkv_ext,
         fuse_qkv_prim=fuse_qkv_prim,
         stack_cfg_cache=stack_cfg_cache,
+        fuse_mlp_lowrank_R=fuse_mlp_lowrank_R,
+        drop_blocks=drop_blocks,
         detailed_stats=detailed_stats,
         exact_step_sync=exact_step_sync,
         sampling_mode=sampling_mode,
@@ -217,6 +221,8 @@ def run_profile(
         "fuse_qkv_ext": fuse_qkv_ext,
         "fuse_qkv_prim": fuse_qkv_prim,
         "stack_cfg_cache": stack_cfg_cache,
+        "fuse_mlp_lowrank_R": fuse_mlp_lowrank_R,
+        "drop_blocks": ",".join(str(b) for b in drop_blocks),
         "detailed_stats": detailed_stats,
         "exact_step_sync": exact_step_sync,
         "sampling_mode": sampling_mode,
@@ -320,6 +326,8 @@ def main() -> None:
     parser.add_argument("--fuse-qkv-ext", action="store_true", help="Track A1-full M3 v2: route q/k/v matmuls through the xgrn_ext C++ extension (simdgroup_matmul_bf16).")
     parser.add_argument("--fuse-qkv-prim", action="store_true", help="Track A1-full M5 v3: route q/k/v matmuls through xgrn_ext.simdgroup_matmul_primitive (axpby-style Custom Primitive).")
     parser.add_argument("--stack-cfg-cache", action="store_true", help="Experimental: pass stacked CFG K/V cache tensors to the compiled visual pass.")
+    parser.add_argument("--fuse-mlp-lowrank-R", type=int, default=0, help="Track P1-1: SVD-truncate mlp.down_proj weight to rank R; replaces 1 matmul with 2 (cost M·R·(in+out) vs M·in·out). Set 0 to disable. Recommended 1536 (R=67%, low CLIP risk).")
+    parser.add_argument("--drop-blocks", default="", help="P1-2: comma-separated block indices to skip in visual_forward (e.g. '14' or '13,14'). Each block dropped saves ~3.5% e2e but reduces capacity.")
     parser.add_argument("--detailed-stats", action="store_true", help="Compute entropy and detailed per-step stats; slower because it syncs every step.")
     parser.add_argument("--exact-step-sync", action="store_true", help="Use sampled mask mean as the next step token, matching the debug parity path but adding a per-step sync.")
     parser.add_argument("--sampling-mode", choices=["categorical", "binary", "argmax"], default="categorical", help="Token sampling mode. categorical matches the official stochastic path; binary is an equivalent Bernoulli sampler for two classes; argmax is a debug quality tradeoff.")
@@ -394,6 +402,8 @@ def main() -> None:
                 fuse_qkv_ext=args.fuse_qkv_ext,
                 fuse_qkv_prim=args.fuse_qkv_prim,
                 stack_cfg_cache=args.stack_cfg_cache,
+                fuse_mlp_lowrank_R=args.fuse_mlp_lowrank_R,
+                drop_blocks=tuple(int(s) for s in args.drop_blocks.split(",") if s.strip()),
                 detailed_stats=args.detailed_stats,
                 exact_step_sync=args.exact_step_sync,
                 sampling_mode=args.sampling_mode,
@@ -428,6 +438,8 @@ def main() -> None:
                 fuse_qkv_ext=args.fuse_qkv_ext,
                 fuse_qkv_prim=args.fuse_qkv_prim,
                 stack_cfg_cache=args.stack_cfg_cache,
+                fuse_mlp_lowrank_R=args.fuse_mlp_lowrank_R,
+                drop_blocks=tuple(int(s) for s in args.drop_blocks.split(",") if s.strip()),
                 detailed_stats=args.detailed_stats,
                 exact_step_sync=args.exact_step_sync,
                 sampling_mode=args.sampling_mode,

@@ -246,6 +246,7 @@ for the active task briefs.
 | `--min-change-frac 0.005` | did not early-stop on a 0.06M/20 smoke; not a default speed path |
 | `--track-token-confidence` | `0.25M/50` trace shows 50% of tokens exceed 0.9 confidence only at step 38, so sparse DUS is not justified yet |
 | `--cfg-start-step K` (Track C) | K=0 byte-identical to today. On the standard `t2i-correct` prompt: K=10 passes razor-thin (CLIP 0.9332, 9.4% saving), **K=15 passes with margin (0.9635, 13.8% saving, end-to-end 76.66 → 66.10 s)**, K=17/20/25 collapse CLIP (0.5997/0.7440/0.0028). Quality non-monotonic in K. Partial multi-prompt re-run with harder CLIP distractors (`"random noise pattern"`, `"a black and white photograph"`) re-scored the K=0 baseline at 0.685 instead of 0.9904 — the 0.93 gate was an artifact of the original easy negative set. Against harder distractors the K=10 image's top label flips to `"a blurry distorted image"`, exposing quality cost that the original gate hid; K=15 still classifies as cat. Multi-prompt sweep stopped after the first prompt to avoid concurrent GPU pressure. Ship opt-in only, K=0 default. |
+| **2026-05-17 deep research sweep** (4 parallel agents → 7 prioritized spikes) | All 7 spikes regressed or kill CLIP. Only `P0-3` (cache fp32-cast norm weights, eliminates 7000 redundant astype dispatches) shipped at ≈0% measurable improvement. **`--fuse-mlp-lowrank-R N`** (P1-1, SVD `down_proj`): R=1536 wall -1.7% but CLIP 0.99→0.01; R=2304 full-rank still drops CLIP to 0.69 (bf16 dual-matmul precision compounds; GRN MLP weights are full-rank S[0]=78, S[-5]≈2.5). **`--drop-blocks N`** (P1-2, layer skip): wall -3.5% per block but CLIP 0.99→0.002 (GRN has no layer-level redundancy). `compute_dtype="fp16"` (industry default): +1.6% e2e regression (pipeline cast overhead dominates isolated -7.5% matmul wins). `mx.compile(shapeless=True)`: KV-cache `Slice` requires static shape. `mx.fast.rope` swap: 3D RoPE architecturally incompatible. `MLX_SDPA_BLOCKS=32`: isolated SDPA -30%, e2e -0.3%. All flags retained behind `default=0/empty` to prevent re-discovery. Full death-ledger in `PERFORMANCE_PLAN.md` §8. **Calibrations**: M4 Pro peak measured 7.59 TFLOP/s bf16 (was estimated 6.0); Apple GPU `simdgroup_matrix` only fp16/bf16/fp32 — no int8 tensor op on shader cores (int8 is ANE-only); standard diffusion distillation (PD/CM/LCM/DMD/ADD) is mathematically incompatible with GRN's discrete categorical refinement. Only DiMO/Di4C/SDTT/CDLM family applies. |
 
 Regressed experiments remain as opt-in flags for investigation. `--no-compile-visual-pass`,
 `--compile-refinement-update`, `--sampling-mode argmax`, `--sampling-mode binary`,
@@ -261,9 +262,24 @@ and `CODEX_TASKS.md` for the active Codex task briefs (Tracks A/B/C above).
 
 ## Project status
 
-Software-only MLX optimization for the current runtime is saturated. Remaining
-wins require custom Metal kernels (Track A), a compile-pass restructuring
-(Track B), or algorithmic changes that preserve the CLIP gate (Tracks C/D).
-Three independent codex tmux sessions own one track each — they share the
-strict correctness gate defined in `PERFORMANCE_PLAN.md` §3 and are not
-permitted to flip defaults without passing it.
+Software-only MLX optimization for the current runtime is **definitively
+saturated** as of 2026-05-17 after a 4-agent deep research sweep produced 7
+prioritized framework + architecture spikes, all of which regressed (full
+death-ledger in `PERFORMANCE_PLAN.md` §8). Calibrated peak measurements show
+MLP matmuls run at 74-95% of M4 Pro's 7.59 TFLOP/s bf16 peak. GRN MLP weights
+are full-rank (SVD truncation kills CLIP) and layers are non-redundant
+(dropping any block kills CLIP). Apple GPU shader cores have no int8 tensor
+op (Apple MSL spec §6.16) — int8 is ANE-only.
+
+Remaining open paths are all training-side or research-grade:
+
+- **Track D · DiMO step distillation** (8×A100 · 3-5 days · ~$1.5-2.5K cloud · 50→8 steps · ~6× e2e). M4 Pro can only host LoRA fine-tuning.
+- **DiTFastAttn cross-timestep attention sharing** (arXiv 2406.08552, training-free, untested on discrete-refinement, 1-2 week prototype).
+- **Token-Critic sampler** (Lezama 2022, ~$100 cloud, drops 50→16 steps).
+
+Standard diffusion distillation literature (Progressive Distillation,
+Consistency Models, LCM, DMD, ADD/SDXL-Turbo) is **mathematically
+incompatible** with GRN's discrete categorical refinement — they require
+PF-ODE or score functions. Only the **discrete-diffusion distillation family**
+(DiMO, Di4C, SDTT, CDLM/MPDC) applies. See `CODEX_TASKS.md` "Closed paths"
+section for the full list of measurement-backed don't-retry items.

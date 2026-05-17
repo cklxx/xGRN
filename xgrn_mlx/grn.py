@@ -17,8 +17,11 @@ def silu(x: mx.array) -> mx.array:
     return x * mx.sigmoid(x)
 
 
-def rms_norm(x: mx.array, weight: mx.array, eps: float = 1e-6) -> mx.array:
-    return mx.fast.rms_norm(x.astype(mx.float32), weight.astype(mx.float32), eps)
+def rms_norm(x: mx.array, weight_fp32: mx.array, eps: float = 1e-6) -> mx.array:
+    # weight_fp32 MUST already be float32. Route via GRN2BMLX.fp32_weight() to
+    # avoid re-dispatching astype on every call (5×28×50 = 7000 dispatches per
+    # refine otherwise).
+    return mx.fast.rms_norm(x.astype(mx.float32), weight_fp32, eps)
 
 
 _HAS_METAL_KERNEL = hasattr(mx.fast, "metal_kernel")
@@ -368,6 +371,8 @@ class GRN2BMLX:
         fuse_qkv_ext: bool = False,
         fuse_qkv_prim: bool = False,
         stack_cfg_cache: bool = False,
+        fuse_mlp_lowrank_R: int = 0,
+        drop_blocks: tuple[int, ...] = (),
     ):
         self.config = config
         if compute_dtype not in {"fp32", "bf16", "fp16"}:
@@ -391,6 +396,10 @@ class GRN2BMLX:
         self.fuse_qkv_prim = fuse_qkv_prim
         self.w_qkv_concat: dict[int, mx.array] = {}
         self.stack_cfg_cache = stack_cfg_cache
+        self.fuse_mlp_lowrank_R = int(fuse_mlp_lowrank_R)
+        self.w_mlp_lowrank: dict[tuple[str, int], tuple[mx.array, mx.array]] = {}
+        self.weights_path = Path(weights_path)
+        self.drop_blocks = frozenset(int(b) for b in drop_blocks)
         self.w32: dict[str, mx.array] = {}
         self.w_compute: dict[str, mx.array] = {}
         self.w_quant: dict[str, tuple[mx.array, mx.array, mx.array]] = {}
@@ -450,6 +459,44 @@ class GRN2BMLX:
                 mx.eval(weight, bias)
             self.w_mlp_gate_up[block] = (weight, bias)
         return self.w_mlp_gate_up[block]
+
+    def mlp_lowrank_weight(self, prefix: str) -> tuple[mx.array, mx.array]:
+        """SVD truncated factorization of a [in, out] weight to (A: [in, R], B: [R, out]).
+
+        Forward becomes y = (x @ A) @ B. Replaces 1 matmul of cost M·in·out with
+        2 matmuls of total cost M·R·(in+out). Pay-off requires R < in*out/(in+out).
+
+        SVD is computed once on CPU and cached to disk under the weights folder
+        (one .npz file per (prefix, R) pair). Cold-start factorization takes
+        ~3-5s per [8192, 2304] matrix; warm boots are O(disk read).
+        """
+        R = self.fuse_mlp_lowrank_R
+        if R <= 0:
+            raise RuntimeError("mlp_lowrank_weight called with R <= 0")
+        cache_key = (prefix, R)
+        if cache_key in self.w_mlp_lowrank:
+            return self.w_mlp_lowrank[cache_key]
+        cache_dir = self.weights_path.parent / "svd_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        safe_prefix = prefix.replace("/", "_").replace(".", "_")
+        cache_file = cache_dir / f"{safe_prefix}_R{R}.npz"
+        if cache_file.exists():
+            data = np.load(cache_file)
+            A_np, B_np = data["A"], data["B"]
+        else:
+            W = self.fp32_weight(f"{prefix}.weight")
+            mx.eval(W)
+            W_np = np.asarray(W, dtype=np.float32)
+            U, S, Vt = np.linalg.svd(W_np, full_matrices=False)
+            sqrt_S = np.sqrt(S[:R]).astype(np.float32)
+            A_np = (U[:, :R] * sqrt_S[None, :]).astype(np.float32)
+            B_np = (sqrt_S[:, None] * Vt[:R]).astype(np.float32)
+            np.savez(cache_file, A=A_np, B=B_np)
+        A = mx.array(A_np).astype(self.compute_dtype)
+        B = mx.array(B_np).astype(self.compute_dtype)
+        mx.eval(A, B)
+        self.w_mlp_lowrank[cache_key] = (A, B)
+        return self.w_mlp_lowrank[cache_key]
 
     def key(self, block: int, suffix: str) -> str:
         chunk = block // self.config.blocks_per_chunk
@@ -770,8 +817,8 @@ class GRN2BMLX:
         q = mx.transpose(q, (0, 2, 1, 3))
         k = mx.transpose(k, (0, 2, 1, 3))
         v = mx.transpose(v, (0, 2, 1, 3))
-        q = rms_norm(q, self.w[self.key(block, "attn.q_norm.weight")])
-        k = rms_norm(k, self.w[self.key(block, "attn.k_norm.weight")])
+        q = rms_norm(q, self.fp32_weight(self.key(block, "attn.q_norm.weight")))
+        k = rms_norm(k, self.fp32_weight(self.key(block, "attn.k_norm.weight")))
         if self.fuse_rope_metal:
             q = fused_rope(q, rope)
             k = fused_rope(k, rope)
@@ -815,6 +862,12 @@ class GRN2BMLX:
             gate = self.block_linear(x, block, "mlp.gate_proj")
             up = self.block_linear(x, block, "mlp.up_proj")
         hidden = swiglu(gate, up) if self.fuse_swiglu_metal else silu(gate) * up
+        if self.fuse_mlp_lowrank_R > 0 and self.linear_quantization == "none":
+            A, B = self.mlp_lowrank_weight(self.key(block, "mlp.down_proj"))
+            # hidden: [..., in]  A: [in, R]  B: [R, out]
+            xc = hidden.astype(self.compute_dtype)
+            y = (xc @ A) @ B
+            return y.astype(mx.float32) if self.compute_dtype != mx.float32 else y
         return self.block_linear(hidden, block, "mlp.down_proj")
 
     def block(
@@ -826,7 +879,7 @@ class GRN2BMLX:
         prefix_v: mx.array | None = None,
         mask: mx.array | None = None,
     ) -> tuple[mx.array, mx.array, mx.array]:
-        h = rms_norm(x, self.w[self.key(block, "input_layernorm.weight")])
+        h = rms_norm(x, self.fp32_weight(self.key(block, "input_layernorm.weight")))
         attn, cur_k, cur_v = self.attention(h, block, rope, prefix_k, prefix_v, mask)
         if self.fuse_residual_norm_metal:
             # The kernel does fp32 accumulation internally and casts the
@@ -836,7 +889,7 @@ class GRN2BMLX:
             x, h = fused_residual_rmsnorm(x, attn, post_w)
         else:
             x = x + attn
-            h = rms_norm(x, self.w[self.key(block, "post_attention_layernorm.weight")])
+            h = rms_norm(x, self.fp32_weight(self.key(block, "post_attention_layernorm.weight")))
         x = x + self.mlp(h, block)
         return x, cur_k, cur_v
 
@@ -939,15 +992,19 @@ class GRN2BMLX:
         if self.compiled_cfg_visual_pass is None:
             depth = self.config.depth
 
+            drop = self.drop_blocks
+
             def cfg_visual_pass(x_: mx.array, rope_: mx.array, mask_: mx.array, *kv: mx.array) -> mx.array:
                 keys = kv[:depth]
                 vals = kv[depth:]
                 y = mx.concatenate([x_, x_], axis=0)
                 for block in range(depth):
+                    if block in drop:
+                        continue
                     y, _, _ = self.block(y, block, rope_, keys[block], vals[block], mask_)
                 return y
 
-            self.compiled_cfg_visual_pass = mx.compile(cfg_visual_pass)
+            self.compiled_cfg_visual_pass = mx.compile(cfg_visual_pass)  # shapeless=True broke: 'Slice cannot infer output shapes' — KV cache concat needs static shape
         return self.compiled_cfg_visual_pass(x, rope, cache.mask, *(cache.k + cache.v))
 
     def visual_forward_cfg_batched_compiled_stacked(self, x: mx.array, rope: mx.array, cache: CFGKVCache) -> mx.array:
@@ -960,7 +1017,7 @@ class GRN2BMLX:
                     y, _, _ = self.block(y, block, rope_, k_stacked_[block], v_stacked_[block], mask_)
                 return y
 
-            self.compiled_cfg_visual_pass = mx.compile(cfg_visual_pass)
+            self.compiled_cfg_visual_pass = mx.compile(cfg_visual_pass)  # shapeless=True broke: 'Slice cannot infer output shapes' — KV cache concat needs static shape
         return self.compiled_cfg_visual_pass(x, rope, cache.mask, cache.k_stacked, cache.v_stacked)
 
     def cfg_logits_compiled(
@@ -993,7 +1050,7 @@ class GRN2BMLX:
         return self.compiled_cfg_logits_passes[compile_key](x, rope, cache.mask, *(cache.k + cache.v))
 
     def logits(self, x: mx.array, token_count: int) -> mx.array:
-        x = rms_norm(x, self.w["head.norm.weight"])
+        x = rms_norm(x, self.fp32_weight("head.norm.weight"))
         x = self.linear(x, "head.proj")
         x = x[:, :token_count]
         return x.reshape(x.shape[0], token_count, -1, self.config.detail_num_lvl)

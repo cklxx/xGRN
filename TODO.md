@@ -158,3 +158,30 @@ Driven by the M4 Pro dispatch-overhead hypothesis: ~200 Metal dispatches/step at
 ### Track D — Step distillation (future, training-side)
 
 - [ ] Decide whether to fund a self-distillation training run (DiMO / CDLM style) to compress 50 steps → 8–12 steps for discrete masked refinement. Out of scope for current runtime work; tracked as the highest remaining ceiling.
+
+## 2026-05-17 Deep Research Sweep — All 7 Spikes Negative
+
+Four parallel research agents (framework gaps / external projects / Track D distillation / architectural prototypes) produced a Top-7 prioritized spike list. **All 7 tested negative** on `t2i-correct` warm. Only `P0-3` (cache fp32-cast norm weights) shipped at ≈0% measurable improvement. Full results in `PERFORMANCE_PLAN.md` §8.
+
+Key calibrations:
+- M4 Pro bf16 peak measured **7.59 TFLOP/s** (we'd been using 6.0). MLP utilization is 74-95% peak, not 87-95%.
+- GRN MLP weights are full-rank: S[0]=77.6, S[-5]≈2.5. R=1536 truncation = 27% Frobenius loss → SVD low-rank kills CLIP.
+- GRN has no layer redundancy: dropping any single mid-network block drops CLIP from 0.99 to 0.002.
+- xGRN BF16 + 50 steps is industry-outlier (Draw Things/mflux/Apple all FP16; MaskGIT/Muse/Sana use 8-24 steps) but FP16 swap regresses by +1.6% (pipeline cast overhead > isolated matmul savings).
+- Apple GPU shader cores have no `simdgroup_matrix<int8>` — int8 tensor ops are ANE-only. Hardware-level reason int8 quant is dead.
+- Most diffusion distillation (Progressive, CM, LCM, DMD, ADD/Turbo) requires PF-ODE or score function — incompatible with GRN's discrete categorical refinement. Only **discrete-diffusion family** (DiMO, Di4C, SDTT, CDLM/MPDC) is viable.
+
+Experimental flags retained behind `default=0/empty` (do not enable, kept to prevent re-discovery):
+
+- `--fuse-mlp-lowrank-R N`  (P1-1 SVD truncation, kills CLIP)
+- `--drop-blocks N1,N2,...`  (P1-2 layer dropping, kills CLIP)
+- `--fuse-swiglu-metal`  (loses to mx.compile -56%)
+- `--fuse-qkv-{metal,concat,ext,prim}`  (all regressed +3.77-7.30% in 2026-05-15 sweep)
+
+**Stop rule (2026-05-17)**: do not propose framework or single-layer architectural changes unless backed by literature **specifically on discrete-token / categorical / masked refinement models** plus a pre-experiment CLIP-risk plan. LLM compression / DDPM distillation literature is ruled out for xGRN.
+
+Remaining open paths (all training-side or research-grade):
+
+- [ ] **Track D · DiMO step distillation** — 8×A100 · 3-5d · ~$1.5-2.5K cloud · 50→8 steps · expected 6× wall (76→13s). M4 Pro only LoRA-fine-tunes, can't host main distillation pass.
+- [ ] **DiTFastAttn cross-timestep attention sharing prototype** (arXiv 2406.08552) — training-free, untested on discrete-refinement architectures, 1-2 week prototyping. Plausible 1.5-2× e2e if adjacent-step attention similarity holds.
+- [ ] **Token-Critic sampler** (Lezama 2022) — train external critic, $100 cloud A100·80h, drops 50→16 steps, sampler-only.

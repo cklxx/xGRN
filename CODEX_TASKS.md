@@ -103,3 +103,46 @@ Algorithmic, not kernel. Published finding (Self-Guidance for MaskGIT, NeurIPS 2
 - Task 3 (`swiglu_split` Metal kernel) — earlier attempt regressed and is opt-in only; revisited only when A1 ships and frees the per-block dispatch budget for the MLP fusion.
 - Task 4 (`compile_refinement_update` random-state try/except fallback) — done.
 - Task 5 (`--min-change-frac` opt-in early termination) — done; no default change until Track C settles the K sweep, since both touch the refinement loop.
+
+## Closed paths (do NOT retry — 2026-05-15 + 2026-05-17 measurements)
+
+Future codex agents: these have been measured against the `t2i-correct` gate and produce regression OR have a hardware/architecture-level reason for being infeasible. Do not re-propose without new published research specifically on **discrete-token / categorical / masked refinement** models.
+
+**Framework / dispatch layer (closed):**
+
+- `mx.compile(shapeless=True)` on visual_pass — KV-cache `Slice cannot infer output shapes`. Static-shape pin required.
+- `compute_dtype="fp16"` — pipeline +1.6% e2e regression even though isolated small-shape matmul is -7.5%. Cast overhead in the compile graph dominates.
+- `MLX_SDPA_BLOCKS={8,16,32,48,64,96}` sweep — isolated SDPA -30% at BLOCKS=32, e2e -0.3% (already overlapped in compile pipeline).
+- `mx.fast.rope` swap for `apply_rope` — xGRN uses 3D RoPE (frame × height × width); `mx.fast.rope` is 1D-sequence-offset only. Architecturally incompatible.
+- `async_eval` cross-step pipelining — measured tied with serial (62.10 vs 62.89 ms). Lazy graph already does this.
+- Multi-stream q/k/v on separate MTLCommandQueues — 0% (single matmul saturates GPU at our shape).
+- Big-fused QKV `[M,K]@[K,3N]` — 0% (Apple GEMM doesn't distinguish shape grouping at this scale).
+- nvfp4 / mxfp8 — M4 has no native FP4/FP8 acceleration.
+
+**Quantization (closed at GPU level):**
+
+- `mx.fast.quantized_matmul` int4/int8 × group_size {32,64,128} — 0% or up to +29% regression. Reason: MLX's quant kernel uses scalar lanes, no `simdgroup_matrix`. Plus Apple GPU `simdgroup_matrix` only supports fp16/bf16/fp32 — there is no int8 tensor op on shader cores (int8 tensorop is ANE-only). Verified against Metal Shading Language Specification §6.16.
+- Hand-rolled `xgrn_swiglu_fused` Metal kernel — +56% regression. `mx.compile` already auto-fuses `silu(gate)*up` at 113 GB/s = 41% peak BW. Manual kernel uses non-optimal threadgroup layout.
+
+**QKV fusion (closed, all 7 variants regressed):**
+
+- `--fuse-qkv-metal` (Python kernel), `--fuse-qkv-concat` (MLX-only), `--fuse-qkv-ext` (C++ extension), `--fuse-qkv-prim` (Custom Primitive) — all +3.77 to +7.30% GRN regression. Root cause: integration tax with `mx.compile` visual_pass — breaks MLX's internal buffer-pool reuse / encoder batching / command-buffer pipeline.
+
+**Architectural compression (closed for GRN specifically):**
+
+- SVD low-rank `down_proj` (R=1536, 1152, 768, even R=2304 full-rank) — kills CLIP from 0.99 to 0.01-0.69. Root cause: GRN MLP weights are **full-rank** (S[0]=77.6, S[-5]≈2.5, flat decay). LLM literature (ASVD, SVD-LLM) assumes high-redundancy weights — does not transfer to a 2B refinement model trained from scratch. Additionally, bf16 dual-matmul accumulates precision error.
+- Layer dropping (skip block 14 in visual_forward) — wall -3.5% but CLIP 0.99→0.002. GRN has no layer-level redundancy.
+
+**Distillation methods (closed by architectural mismatch):**
+
+- Progressive Distillation, Consistency Models, LCM, DMD/DMD2, ADD/SDXL-Turbo — all require either a PF-ODE on continuous latents or a score function `∇_x log p`. GRN's discrete categorical refinement on continuous `pt` AdaLN has neither. **Direct application impossible.**
+
+**Open paths that DO transfer to GRN (use these if you want to make progress):**
+
+- DiMO (ICCV 2025, https://arxiv.org/abs/2503.15457) — discrete masked diffusion to 1-step, verified on Meissonic (same masked-T2I family). Token-level KL distillation matches GRN's logits output.
+- Di4C (ICML 2025, Sony) — solves the token-independence problem at 1-step generation via mixture model.
+- CDLM/MPDC (Amin 2026) — exact posterior bridge consistency, teacher-free, mathematically cleanest for GRN's `where(mask, pred, rand)` operation.
+- DiTFastAttn cross-timestep attention sharing (arXiv 2406.08552) — training-free, untested on discrete-refinement, candidate for 1-2 week prototype.
+- Token-Critic (Lezama 2022) — sampler-only critic, ~$100 cloud train, drops MaskGIT-class models 50→16 steps.
+
+See `PERFORMANCE_PLAN.md` §8-9 for full measurement details and citations.
